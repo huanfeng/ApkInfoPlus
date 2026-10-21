@@ -6,13 +6,15 @@ use windui::core::EventCtx;
 use windui::prelude::*;
 
 use crate::actions;
-use crate::state::AppState;
+use crate::state::{AppState, Doc};
 
 #[derive(Clone)]
 pub struct RenameState {
     pub name: Signal<String>,
     pub error: Signal<String>,
     pub focus: Signal<u64>,
+    /// 正在改名的文档（打开对话框后用户可能切到别的文档，改的仍是这一个）。
+    pub doc_id: std::rc::Rc<std::cell::Cell<u64>>,
 }
 
 impl RenameState {
@@ -21,13 +23,18 @@ impl RenameState {
             name: signal(String::new()),
             error: signal(String::new()),
             focus: signal(0),
+            doc_id: Default::default(),
         }
     }
 }
 
+fn target_doc(state: &AppState) -> Option<std::rc::Rc<Doc>> {
+    state.doc_by_id(state.rename.doc_id.get())
+}
+
 /// 预设用的扩展名：按解析出的容器类型给，`.apk.1` / `.zip` 这类原名不能照搬（过不了校验）。
-fn current_ext(state: &AppState) -> String {
-    match state.current_info().map(|i| i.kind) {
+fn current_ext(doc: &Doc) -> String {
+    match doc.current_info().map(|i| i.kind) {
         Some(apkinfo_core::info::ArchiveKind::Xapk) => ".xapk",
         Some(apkinfo_core::info::ArchiveKind::Apkm) => ".apkm",
         Some(apkinfo_core::info::ArchiveKind::Apks) => ".apks",
@@ -36,11 +43,11 @@ fn current_ext(state: &AppState) -> String {
     .to_string()
 }
 
-fn preset(state: &AppState, which: Preset) -> String {
-    let Some(info) = state.current_info() else {
+fn preset(doc: &Doc, which: Preset) -> String {
+    let Some(info) = doc.current_info() else {
         return String::new();
     };
-    let label = actions::sanitize_file_name(&state.display_label());
+    let label = actions::sanitize_file_name(&doc.display_label());
     let label = if label.is_empty() {
         info.meta
             .package_name
@@ -51,7 +58,7 @@ fn preset(state: &AppState, which: Preset) -> String {
     };
     let version = actions::sanitize_file_name(info.meta.version_name.as_deref().unwrap_or(""));
     let package = actions::sanitize_file_name(info.meta.package_name.as_deref().unwrap_or(""));
-    let ext = current_ext(state);
+    let ext = current_ext(doc);
     match which {
         Preset::Default => format!("{}-{}{}", label, version, ext),
         Preset::NameOnly => format!("{}{}", label, ext),
@@ -68,9 +75,10 @@ enum Preset {
     PackageVersion,
 }
 
-pub fn open(state: &AppState) {
+pub fn open(state: &AppState, doc: &Doc) {
     let rn = &state.rename;
-    rn.name.set(preset(state, Preset::Default));
+    rn.doc_id.set(doc.id);
+    rn.name.set(preset(doc, Preset::Default));
     rn.error.set(String::new());
     state.show_rename.set(true);
     rn.focus.update(|n| *n += 1);
@@ -117,9 +125,11 @@ pub fn validate(name: &str, dir: &Path, old: &Path) -> Result<PathBuf, String> {
 
 fn do_rename(state: &AppState, ctx: &mut EventCtx) {
     let rn = &state.rename;
-    let Some(old) = state.file_path.get() else {
+    let Some(doc) = target_doc(state) else {
+        state.show_rename.set(false);
         return;
     };
+    let old = doc.path.get();
     let dir = old.parent().map(Path::to_path_buf).unwrap_or_default();
     match validate(&rn.name.get(), &dir, &old) {
         Err(e) => rn.error.set(e),
@@ -130,17 +140,19 @@ fn do_rename(state: &AppState, ctx: &mut EventCtx) {
             }
             // 放掉 IconSession 里打开的 zip：std 打开文件时带 FILE_SHARE_DELETE，改名本身能成功，
             // 但旧会话指向的是改名前的路径，留着只会让后续图标切换读到一个「不存在」的文件。
-            *state.session.borrow_mut() = None;
+            *doc.session.borrow_mut() = None;
             match std::fs::rename(&old, &dest) {
                 Ok(()) => {
                     state.show_rename.set(false);
                     ctx.toast_ok(tr!("rename.success"));
-                    actions::open_file(state, ctx, dest);
+                    doc.path.set(dest);
+                    state.touch_active();
+                    actions::reparse_doc(state, ctx, &doc);
                 }
                 Err(e) => {
                     rn.error.set(tr!("rename.failed", error = e.to_string()));
-                    // 改名失败，恢复会话以便继续切换图标。
-                    actions::open_file(state, ctx, old);
+                    // 改名失败，重新解析以恢复会话、继续切换图标。
+                    actions::reparse_doc(state, ctx, &doc);
                 }
             }
         }
@@ -159,7 +171,9 @@ pub fn build_dialog(state: &AppState) -> Element {
             .neutral()
             .outline()
             .on_click(move |_| {
-                st.rename.name.set(preset(&st, which));
+                if let Some(doc) = target_doc(&st) {
+                    st.rename.name.set(preset(&doc, which));
+                }
                 st.rename.error.set(String::new());
             })
     };

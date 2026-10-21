@@ -1,4 +1,4 @@
-//! 概览头：图标 + 应用名 / 包名 / 版本 / 类型徽章，右侧图标候选切换与导出。
+//! 概览头：卡片里放图标 + 应用名 / 包名 / 版本 / 类型徽章 + 摘要，右侧是「安装到设备」。
 
 use std::rc::Rc;
 
@@ -6,34 +6,44 @@ use apkinfo_core::info::{format_file_size, sdk_version_text, ApkInfo};
 use windui::prelude::*;
 
 use crate::actions;
-use crate::state::AppState;
+use crate::icons;
+use crate::state::{AppState, Doc};
 
 pub const ICON_SIZE: i32 = 96;
 
-pub fn build(state: &AppState, info: Rc<ApkInfo>) -> Element {
-    Element::row()
+pub fn build(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
+    Element::col()
         .width_match()
-        .cross(Align::Start)
-        .spacing(18)
-        .padding_edges(Insets::new(super::PAGE_PAD, 16, super::PAGE_PAD, 12))
-        .child(icon_block(state))
-        .child(text_block(state, info.clone()).weight(1.0))
+        .padding_edges(Insets::new(super::PAGE_PAD, 14, super::PAGE_PAD, 0))
+        .child(
+            Element::row()
+                .width_match()
+                .cross(Align::Start)
+                .spacing(18)
+                .padding(16)
+                .bg_role(Role::Surface)
+                .corner(12.0)
+                .border_role(Role::Border, 1)
+                .child(icon_block(state, doc.clone()))
+                .child(text_block(doc.clone(), info.clone()).weight(1.0))
+                .child(action_block(state)),
+        )
 }
 
-/// 图标区：图片（随 `state.icon` 重建）+ 候选切换条。
-fn icon_block(state: &AppState) -> Element {
+/// 图标区：图片（随 `doc.icon` 重建）+ 候选切换条。
+fn icon_block(state: &AppState, doc: Rc<Doc>) -> Element {
     let st = state.clone();
-    let image = Element::host_signal(state.icon, move |img: Rc<apkinfo_core::icon::RgbaImage>| {
+    let image = Element::host_signal(doc.icon, move |img: Rc<apkinfo_core::icon::RgbaImage>| {
         Element::image_rgba(img.width, img.height, &img.data)
             .fit(Fit::Contain)
             .size(ICON_SIZE, ICON_SIZE)
             .corner(ICON_SIZE as f32 * 0.22)
     });
     let placeholder_visible = {
-        let icon = state.icon;
+        let icon = doc.icon;
         move || icon.with(|v| v.is_empty())
     };
-    let loading = state.icon_loading;
+    let loading = doc.icon_loading;
     let placeholder = Element::stack()
         .size(ICON_SIZE, ICON_SIZE)
         .corner(ICON_SIZE as f32 * 0.22)
@@ -61,11 +71,12 @@ fn icon_block(state: &AppState) -> Element {
         .child(image)
         .on_context_menu({
             let st = st.clone();
-            move || actions::icon_menu_items(&st)
+            let doc = doc.clone();
+            move || actions::icon_menu_items(&st, &doc)
         });
 
-    let candidates = state.icon_candidates;
-    let index = state.icon_index;
+    let candidates = doc.icon_candidates;
+    let index = doc.icon_index;
     let counter = Signal::map(candidates, move |c| {
         if c.len() <= 1 {
             String::new()
@@ -77,9 +88,10 @@ fn icon_block(state: &AppState) -> Element {
         .width(ICON_SIZE)
         .cross(Align::Center)
         .child(
-            crate::icons::button("chevron_left", 22, tr!("action.prev_icon")).on_click({
+            icons::button("chevron_left", 22, tr!("action.prev_icon")).on_click({
                 let st = st.clone();
-                move |ctx| actions::switch_icon(&st, ctx, -1)
+                let doc = doc.clone();
+                move |_| actions::switch_icon(&st, &doc, -1)
             }),
         )
         .child(
@@ -90,9 +102,10 @@ fn icon_block(state: &AppState) -> Element {
                 .weight(1.0),
         )
         .child(
-            crate::icons::button("chevron_right", 22, tr!("action.next_icon")).on_click({
+            icons::button("chevron_right", 22, tr!("action.next_icon")).on_click({
                 let st = st.clone();
-                move |ctx| actions::switch_icon(&st, ctx, 1)
+                let doc = doc.clone();
+                move |_| actions::switch_icon(&st, &doc, 1)
             }),
         )
         .visible_when(move || candidates.with(|c| c.len() > 1));
@@ -104,12 +117,11 @@ fn icon_block(state: &AppState) -> Element {
         .child(nav)
 }
 
-fn text_block(state: &AppState, info: Rc<ApkInfo>) -> Element {
-    let st = state.clone();
+fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     let meta = &info.meta;
 
     // 应用名随语言选择变化：派生信号，读 label_locale 现算。
-    let label_locale = state.label_locale;
+    let label_locale = doc.label_locale;
     let info_for_label = info.clone();
     let label_text = Signal::map(label_locale, move |loc| {
         info_for_label
@@ -132,15 +144,15 @@ fn text_block(state: &AppState, info: Rc<ApkInfo>) -> Element {
                 .truncate(Truncate::End),
         );
     if has_alternatives {
-        let st2 = st.clone();
+        let d = doc.clone();
         name_row = name_row.child(
-            crate::icons::button("globe", 26, tr!("action.switch_label_language"))
-                .on_click(move |ctx| actions::show_label_menu(&st2, ctx)),
+            icons::button("globe", 26, tr!("action.switch_label_language"))
+                .on_click(move |ctx| actions::show_label_menu(&d, ctx)),
         );
     }
     name_row = name_row.child(Element::badge_intent(
         info.kind.display_name(),
-        Intent::Neutral,
+        Intent::Primary,
     ));
 
     let package = meta.package_name.clone().unwrap_or_default();
@@ -188,4 +200,14 @@ fn text_block(state: &AppState, info: Rc<ApkInfo>) -> Element {
                 .font_size(12.5)
                 .fg_role(Role::TextSubtle),
         )
+}
+
+/// 右侧动作：安装到设备（与工具栏同一入口，放在最显眼的位置）。
+fn action_block(state: &AppState) -> Element {
+    let st = state.clone();
+    Element::col().spacing(8).child(
+        Element::button(t!("install.install_to_device"))
+            .icon_content(icons::content("play", icons::ICON_WHITE))
+            .on_click(move |ctx| actions::open_install(&st, ctx)),
+    )
 }

@@ -52,6 +52,8 @@ pub struct InstallState {
     pub log: Signal<String>,
     /// 窗口顶部显示的「正在为哪个文件安装」。
     pub file_name: Signal<String>,
+    /// 装的是哪个文档（打开窗口后用户可能切到别的文档，装的仍是这一个）。
+    pub doc_id: Rc<std::cell::Cell<u64>>,
     /// 分包行的信号归它所有：每次打开对话框整批回收再重建，否则每开一次就漏一批。
     /// `ManuallyDrop`：进程退出时信号 arena（线程局部）可能先于 AppState 销毁，
     /// 那时再 dispose 会撞 TLS 已析构而 abort；这两个作用域只在重建时手动回收。
@@ -78,6 +80,7 @@ impl InstallState {
             cancel: Rc::new(std::cell::RefCell::new(None)),
             log: signal(String::new()),
             file_name: signal(String::new()),
+            doc_id: Default::default(),
             split_scope: Rc::new(std::cell::RefCell::new(std::mem::ManuallyDrop::new(
                 windui::signal::SignalScope::new(),
             ))),
@@ -90,7 +93,10 @@ impl InstallState {
 
 /// 打开安装窗口：填充分包行、刷新设备。窗口已开着时只把它拉到前台（`single` 去重）。
 pub fn open(state: &AppState, ctx: &mut EventCtx) {
-    let Some(info) = state.current_info() else {
+    let Some(doc) = state.active_doc() else {
+        return;
+    };
+    let Some(info) = doc.current_info() else {
         return;
     };
     let ins = &state.install;
@@ -99,6 +105,7 @@ pub fn open(state: &AppState, ctx: &mut EventCtx) {
         ctx.open_window(window(state));
         return;
     }
+    ins.doc_id.set(doc.id);
     ins.file_name.set(
         info.path
             .file_name()
@@ -262,7 +269,11 @@ pub fn on_event(state: &AppState, ctx: &mut EventCtx, ev: InstallEvent) {
 
 fn start_install(state: &AppState, ctx: &mut EventCtx) {
     let ins = &state.install;
-    let Some(info) = state.current_info() else {
+    let Some(info) = state
+        .doc_by_id(ins.doc_id.get())
+        .and_then(|d| d.current_info())
+    else {
+        ctx.toast_err(tr!("install.doc_closed"));
         return;
     };
     let Some(adb) = crate::tools::resolve_adb(state) else {

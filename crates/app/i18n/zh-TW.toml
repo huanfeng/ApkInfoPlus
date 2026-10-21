@@ -151,6 +151,8 @@ failed = "重新命名失敗: {error}"
 
 [install]
 title = "安裝到裝置"
+install_to_device = "安裝到裝置"
+doc_closed = "要安裝的檔案已關閉"
 select_device = "選擇裝置"
 no_devices = "未偵測到裝置，請連接裝置並開啟 USB 偵錯"
 no_adb = "找不到 adb，請在設定中指定 adb 路徑或下載 platform-tools"
@@ -260,3 +262,9 @@ restore = "還原"
 minimize = "最小化"
 maximize = "最大化"
 close = "關閉"
+
+[sidebar]
+title = "已開啟 ({count})"
+close_all = "全部關閉"
+search = "搜尋檔名或套件名…"
+open_count = "{count} 個檔案"

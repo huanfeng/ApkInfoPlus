@@ -150,6 +150,8 @@ failed = "名前の変更に失敗しました: {error}"
 
 [install]
 title = "デバイスにインストール"
+install_to_device = "デバイスにインストール"
+doc_closed = "インストール対象のファイルは閉じられました"
 select_device = "デバイスを選択"
 no_devices = "デバイスが見つかりません。接続して USB デバッグを有効にしてください"
 no_adb = "adb が見つかりません。設定でパスを指定するか platform-tools をダウンロードしてください"
@@ -259,3 +261,9 @@ restore = "元に戻す"
 minimize = "最小化"
 maximize = "最大化"
 close = "閉じる"
+
+[sidebar]
+title = "開いているファイル ({count})"
+close_all = "すべて閉じる"
+search = "ファイル名またはパッケージ名で検索…"
+open_count = "{count} 件"

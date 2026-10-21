@@ -1,4 +1,7 @@
 //! 用户动作与后台消息处理。所有「做事」的逻辑集中在这里，界面模块只负责接线。
+//!
+//! 作用在文件上的动作都显式收一个 `Rc<Doc>`；工具栏那种「对当前文档」的入口
+//! 先取 `state.active_doc()` 再调过来。
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -11,7 +14,7 @@ use windui::core::EventCtx;
 use windui::event::MenuItem;
 use windui::prelude::*;
 
-use crate::state::{AppState, HashState, Msg, SigState};
+use crate::state::{AppState, Doc, HashState, Msg, SigState};
 use crate::ui::shorten;
 
 /// 导出时渲染的尺寸。
@@ -40,9 +43,9 @@ fn guarded<T>(what: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, St
     }
 }
 
-/// 安装进行中时阻止会动文件的操作，并提示。
-fn blocked_by_install(state: &AppState, ctx: &mut EventCtx) -> bool {
-    if state.install.installing.get() {
+/// 正在给这个文档安装时，阻止会动它的操作（关闭 / 重新解析 / 改名），并提示。
+fn blocked_by_install(state: &AppState, ctx: &mut EventCtx, doc: &Doc) -> bool {
+    if state.install.installing.get() && state.install.doc_id.get() == doc.id {
         ctx.toast(tr!("install.installing"));
         true
     } else {
@@ -85,9 +88,6 @@ pub fn is_supported_file(path: &Path) -> bool {
 // ---------------------------------------------------------------------------
 
 pub fn pick_file(state: &AppState, ctx: &mut EventCtx) {
-    if blocked_by_install(state, ctx) {
-        return;
-    }
     let st = state.clone();
     let mut dlg = windui::prelude::PickDialog::new()
         .title(tr!("open.select_apk_file"))
@@ -103,51 +103,68 @@ pub fn pick_file(state: &AppState, ctx: &mut EventCtx) {
     ctx.request_pick_file(dlg, move |picked| {
         if let Some(p) = picked {
             // 回调没有 ctx：经通道回到 UI 线程再开文件。
-            let _ = st.tx.send(Msg::OpenPath(p));
+            let _ = st.tx.send(Msg::OpenPaths(vec![p]));
         }
     });
 }
 
-pub fn open_dropped(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
-    if blocked_by_install(state, ctx) {
-        return;
+/// 拖放 / 命令行 / 第二实例送来的一批路径：不支持的提示一次，其余逐个打开，
+/// 批次里第一个成为当前文档。
+pub fn open_paths(state: &AppState, ctx: &mut EventCtx, paths: Vec<PathBuf>) {
+    let mut first: Option<u64> = None;
+    let mut rejected = false;
+    for p in paths {
+        if !is_supported_file(&p) {
+            rejected = true;
+            continue;
+        }
+        if let Some(doc) = open_file(state, ctx, p) {
+            first.get_or_insert(doc.id);
+        }
     }
-    if !is_supported_file(&path) {
+    if rejected {
         ctx.toast_err(tr!("drop.invalid_file_type"));
-        return;
     }
-    open_file(state, ctx, path);
+    if let Some(id) = first {
+        state.set_active(id);
+    }
 }
 
-/// 打开文件：重置状态，启动解析 / 哈希 / 签名三条后台线程。
-pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
-    if blocked_by_install(state, ctx) {
-        return;
-    }
+/// 打开文件：已经开着就切过去；否则新建文档并启动解析 / 哈希 / 签名三条后台线程。
+pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) -> Option<Rc<Doc>> {
     if !path.is_file() {
         ctx.toast_err(tr!(
             "open.file_not_found",
             path = path.display().to_string()
         ));
-        return;
+        return None;
     }
-    let gen = state.next_generation();
-    state.clear_file_state();
-    state.file_path.set(Some(path.clone()));
-    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    state.file_size.set(size);
-    state.parsing.set(true);
-    state.window_title.set(format!(
-        "{} - APK Info Plus",
-        path.file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    ));
+    if let Some(doc) = state.doc_by_path(&path) {
+        state.set_active(doc.id);
+        return Some(doc);
+    }
     if let Some(dir) = path.parent() {
         let dir = dir.display().to_string();
         state.update_config(|c| c.last_dir = dir);
     }
     log::info!("打开文件: {}", path.display());
+    let doc = Doc::new(state.next_generation(), path);
+    state.add_doc(doc.clone());
+    start_parse(state, &doc);
+    Some(doc)
+}
+
+/// （重新）解析文档：换新代次，清旧结果，三条后台线程各自带着代次回报。
+fn start_parse(state: &AppState, doc: &Rc<Doc>) {
+    let gen = state.next_generation();
+    doc.gen.set(gen);
+    doc.reset();
+    let path = doc.path.get();
+    doc.file_size
+        .set(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0));
+    doc.parsing.set(true);
+    doc.subtitle.set(tr!("parse.parsing"));
+    state.refresh_entries();
 
     // 解析线程
     {
@@ -165,7 +182,7 @@ pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
 
     // 哈希线程
     if state.cfg(|c| c.enable_hash) {
-        state.hash_state.set(HashState::Computing);
+        doc.hash_state.set(HashState::Computing);
         let tx = state.tx.clone();
         let p = path.clone();
         thread::spawn(move || {
@@ -175,16 +192,16 @@ pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
             let _ = tx.send(Msg::Hashes { gen, result });
         });
     } else {
-        state.hash_state.set(HashState::Disabled);
+        doc.hash_state.set(HashState::Disabled);
     }
 
     // 签名线程：归档包没有整体签名，直接标记不适用。
     if !state.cfg(|c| c.enable_signature) {
-        state.sig_state.set(SigState::Disabled);
+        doc.sig_state.set(SigState::Disabled);
     } else if ArchiveKind::from_path(&path).is_archive() {
-        state.sig_state.set(SigState::NotApplicable);
+        doc.sig_state.set(SigState::NotApplicable);
     } else {
-        state.sig_state.set(SigState::Computing);
+        doc.sig_state.set(SigState::Computing);
         let tx = state.tx.clone();
         let p = path.clone();
         thread::spawn(move || {
@@ -196,35 +213,64 @@ pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
     }
 }
 
-pub fn reparse(state: &AppState, ctx: &mut EventCtx) {
-    if let Some(p) = state.file_path.get() {
-        open_file(state, ctx, p);
+pub fn reparse_doc(state: &AppState, ctx: &mut EventCtx, doc: &Rc<Doc>) {
+    if blocked_by_install(state, ctx, doc) {
+        return;
     }
+    start_parse(state, doc);
+}
+
+pub fn reparse(state: &AppState, ctx: &mut EventCtx) {
+    if let Some(doc) = state.active_doc() {
+        reparse_doc(state, ctx, &doc);
+    }
+}
+
+pub fn close_doc(state: &AppState, ctx: &mut EventCtx, doc: &Rc<Doc>) {
+    if blocked_by_install(state, ctx, doc) {
+        return;
+    }
+    state.remove_doc(doc.id);
 }
 
 pub fn close_file(state: &AppState, ctx: &mut EventCtx) {
-    if blocked_by_install(state, ctx) {
+    if let Some(doc) = state.active_doc() {
+        close_doc(state, ctx, &doc);
+    }
+}
+
+/// 关闭全部（正在安装的那个留下）。
+pub fn close_all(state: &AppState, ctx: &mut EventCtx) {
+    for doc in state.docs.get() {
+        close_doc(state, ctx, &doc);
+    }
+}
+
+/// 切到相邻文档（Ctrl+Tab / Ctrl+Shift+Tab），循环。
+pub fn activate_neighbor(state: &AppState, delta: i32) {
+    let docs = state.docs.get();
+    if docs.len() < 2 {
         return;
     }
-    state.next_generation();
-    state.clear_file_state();
-    state.file_path.set(None);
-    state.file_size.set(0);
-    state.parsing.set(false);
-    state.window_title.set("APK Info Plus".into());
+    let cur = docs
+        .iter()
+        .position(|d| d.id == state.active_id.get())
+        .unwrap_or(0) as i32;
+    let next = (cur + delta).rem_euclid(docs.len() as i32) as usize;
+    state.set_active(docs[next].id);
 }
 
 pub fn copy_path(state: &AppState, ctx: &mut EventCtx) {
-    if let Some(p) = state.file_path.get() {
-        let s = p.display().to_string();
+    if let Some(doc) = state.active_doc() {
+        let s = doc.path.with(|p| p.display().to_string());
         ctx.clipboard_set(&s);
         ctx.toast_ok(tr!("action.copied", content = shorten(&s, 60)));
     }
 }
 
 pub fn open_in_file_manager(state: &AppState, ctx: &mut EventCtx) {
-    if let Some(p) = state.file_path.get() {
-        if let Err(e) = reveal_in_file_manager(&p) {
+    if let Some(doc) = state.active_doc() {
+        if let Err(e) = reveal_in_file_manager(&doc.path.get()) {
             ctx.toast_err(e);
         }
     }
@@ -266,28 +312,28 @@ pub fn open_directory(path: &Path) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 /// 切换候选图标（`delta` 为 ±1，循环）。
-pub fn switch_icon(state: &AppState, _ctx: &mut EventCtx, delta: i32) {
-    let count = state.icon_candidates.with(|c| c.len());
+pub fn switch_icon(state: &AppState, doc: &Rc<Doc>, delta: i32) {
+    let count = doc.icon_candidates.with(|c| c.len());
     if count <= 1 {
         return;
     }
-    let cur = state.icon_index.get() as i32;
+    let cur = doc.icon_index.get() as i32;
     let next = ((cur + delta).rem_euclid(count as i32)) as usize;
-    select_icon(state, next);
+    select_icon(state, doc, next);
 }
 
-pub fn select_icon(state: &AppState, index: usize) {
-    let Some(candidate) = state.icon_candidates.with(|c| c.get(index).cloned()) else {
+pub fn select_icon(state: &AppState, doc: &Rc<Doc>, index: usize) {
+    let Some(candidate) = doc.icon_candidates.with(|c| c.get(index).cloned()) else {
         return;
     };
-    let Some(session) = state.session.borrow().clone() else {
+    let Some(session) = doc.session.borrow().clone() else {
         return;
     };
-    state.icon_index.set(index);
-    state.icon_loading.set(true);
-    let gen = state.generation.get();
-    let token = state.icon_req.get() + 1;
-    state.icon_req.set(token);
+    doc.icon_index.set(index);
+    doc.icon_loading.set(true);
+    let gen = doc.gen.get();
+    let token = doc.icon_req.get() + 1;
+    doc.icon_req.set(token);
     let tx = state.tx.clone();
     thread::spawn(move || {
         let result = guarded("图标渲染", || match session.lock() {
@@ -307,32 +353,34 @@ pub fn select_icon(state: &AppState, index: usize) {
 }
 
 /// 图标右键 / 导出菜单。
-pub fn icon_menu_items(state: &AppState) -> Vec<MenuItem> {
+pub fn icon_menu_items(state: &AppState, doc: &Rc<Doc>) -> Vec<MenuItem> {
     let mut items = Vec::new();
-    let candidates = state.icon_candidates.get();
-    let current = state.icon_index.get();
+    let candidates = doc.icon_candidates.get();
+    let current = doc.icon_index.get();
     if candidates.len() > 1 {
         for (i, c) in candidates.iter().enumerate() {
             let st = state.clone();
+            let d = doc.clone();
             items.push(MenuItem::run(
                 c.display_label.clone(),
-                move |_ctx| select_icon(&st, i),
+                move |_ctx| select_icon(&st, &d, i),
                 i == current,
             ));
         }
         items.push(MenuItem::separator());
     }
-    let has_icon = state.icon.with(|v| !v.is_empty());
+    let has_icon = doc.icon.with(|v| !v.is_empty());
     let is_vector = candidates
         .get(current)
         .map(|c| c.kind == IconKind::XmlVector)
         .unwrap_or(false);
     {
         let st = state.clone();
+        let d = doc.clone();
         items.push(
             MenuItem::run(
                 tr!("action.export_png"),
-                move |ctx| export_png(&st, ctx),
+                move |ctx| export_png(&st, &d, ctx),
                 false,
             )
             .enabled(has_icon),
@@ -340,10 +388,11 @@ pub fn icon_menu_items(state: &AppState) -> Vec<MenuItem> {
     }
     {
         let st = state.clone();
+        let d = doc.clone();
         items.push(
             MenuItem::run(
                 tr!("action.export_svg"),
-                move |ctx| export_svg(&st, ctx),
+                move |ctx| export_svg(&st, &d, ctx),
                 false,
             )
             .enabled(has_icon && is_vector),
@@ -351,10 +400,11 @@ pub fn icon_menu_items(state: &AppState) -> Vec<MenuItem> {
     }
     {
         let st = state.clone();
+        let d = doc.clone();
         items.push(
             MenuItem::run(
                 tr!("action.export_original"),
-                move |ctx| export_original(&st, ctx),
+                move |ctx| export_original(&st, &d, ctx),
                 false,
             )
             .enabled(has_icon),
@@ -363,8 +413,8 @@ pub fn icon_menu_items(state: &AppState) -> Vec<MenuItem> {
     items
 }
 
-fn export_base_name(state: &AppState) -> String {
-    let label = state.display_label();
+fn export_base_name(doc: &Doc) -> String {
+    let label = doc.display_label();
     let label = if label.trim().is_empty() {
         "icon".to_string()
     } else {
@@ -386,24 +436,24 @@ pub fn sanitize_file_name(name: &str) -> String {
         .to_string()
 }
 
-fn current_candidate(state: &AppState) -> Option<IconCandidate> {
-    let idx = state.icon_index.get();
-    state.icon_candidates.with(|c| c.get(idx).cloned())
+fn current_candidate(doc: &Doc) -> Option<IconCandidate> {
+    let idx = doc.icon_index.get();
+    doc.icon_candidates.with(|c| c.get(idx).cloned())
 }
 
-fn session_of(state: &AppState) -> Option<Arc<Mutex<apkinfo_core::load::IconSession>>> {
-    state.session.borrow().clone()
+fn session_of(doc: &Doc) -> Option<Arc<Mutex<apkinfo_core::load::IconSession>>> {
+    doc.session.borrow().clone()
 }
 
-pub fn export_png(state: &AppState, ctx: &mut EventCtx) {
-    let (Some(candidate), Some(session)) = (current_candidate(state), session_of(state)) else {
+pub fn export_png(state: &AppState, doc: &Rc<Doc>, ctx: &mut EventCtx) {
+    let (Some(candidate), Some(session)) = (current_candidate(doc), session_of(doc)) else {
         return;
     };
-    let fallback: Option<Rc<RgbaImage>> = state.icon.with(|v| v.first().cloned());
+    let fallback: Option<Rc<RgbaImage>> = doc.icon.with(|v| v.first().cloned());
     let tx = state.tx.clone();
     let dlg = PickDialog::new()
         .title(tr!("action.export_icon"))
-        .file_name(format!("{}_icon.png", export_base_name(state)))
+        .file_name(format!("{}_icon.png", export_base_name(doc)))
         .filter("PNG", &["png"]);
     ctx.request_save_file(dlg, move |dest| {
         let Some(dest) = dest else { return };
@@ -428,8 +478,8 @@ pub fn export_png(state: &AppState, ctx: &mut EventCtx) {
     });
 }
 
-pub fn export_svg(state: &AppState, ctx: &mut EventCtx) {
-    let (Some(candidate), Some(session)) = (current_candidate(state), session_of(state)) else {
+pub fn export_svg(state: &AppState, doc: &Rc<Doc>, ctx: &mut EventCtx) {
+    let (Some(candidate), Some(session)) = (current_candidate(doc), session_of(doc)) else {
         return;
     };
     if candidate.kind != IconKind::XmlVector {
@@ -439,7 +489,7 @@ pub fn export_svg(state: &AppState, ctx: &mut EventCtx) {
     let tx = state.tx.clone();
     let dlg = PickDialog::new()
         .title(tr!("action.export_icon"))
-        .file_name(format!("{}_icon.svg", export_base_name(state)))
+        .file_name(format!("{}_icon.svg", export_base_name(doc)))
         .filter("SVG", &["svg"]);
     ctx.request_save_file(dlg, move |dest| {
         let Some(dest) = dest else { return };
@@ -458,11 +508,11 @@ pub fn export_svg(state: &AppState, ctx: &mut EventCtx) {
     });
 }
 
-pub fn export_original(state: &AppState, ctx: &mut EventCtx) {
-    let (Some(candidate), Some(session)) = (current_candidate(state), session_of(state)) else {
+pub fn export_original(state: &AppState, doc: &Rc<Doc>, ctx: &mut EventCtx) {
+    let (Some(candidate), Some(session)) = (current_candidate(doc), session_of(doc)) else {
         return;
     };
-    let fallback: Option<Rc<RgbaImage>> = state.icon.with(|v| v.first().cloned());
+    let fallback: Option<Rc<RgbaImage>> = doc.icon.with(|v| v.first().cloned());
     let ext = Path::new(&candidate.path)
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -470,7 +520,7 @@ pub fn export_original(state: &AppState, ctx: &mut EventCtx) {
     let tx = state.tx.clone();
     let dlg = PickDialog::new()
         .title(tr!("action.export_icon"))
-        .file_name(format!("{}_icon.{}", export_base_name(state), ext));
+        .file_name(format!("{}_icon.{}", export_base_name(doc), ext));
     ctx.request_save_file(dlg, move |dest| {
         let Some(dest) = dest else { return };
         let fallback = fallback.map(|f| (*f).clone());
@@ -495,29 +545,29 @@ pub fn export_original(state: &AppState, ctx: &mut EventCtx) {
 // 应用名语言菜单
 // ---------------------------------------------------------------------------
 
-pub fn show_label_menu(state: &AppState, ctx: &mut EventCtx) {
-    let Some(info) = state.current_info() else {
+pub fn show_label_menu(doc: &Rc<Doc>, ctx: &mut EventCtx) {
+    let Some(info) = doc.current_info() else {
         return;
     };
-    let current = state.label_locale.get();
+    let current = doc.label_locale.get();
     let mut items = Vec::new();
     {
-        let st = state.clone();
+        let locale = doc.label_locale;
         let default_label = info.meta.label.clone().unwrap_or_default();
         items.push(MenuItem::run(
             format!("{}  {}", tr!("action.default_label"), default_label),
-            move |_ctx| st.label_locale.set(None),
+            move |_ctx| locale.set(None),
             current.is_none(),
         ));
     }
     items.push(MenuItem::separator());
     for (loc, label) in info.alternative_labels() {
-        let st = state.clone();
+        let locale = doc.label_locale;
         let loc_s = loc.to_string();
         let checked = current.as_deref() == Some(loc);
         items.push(MenuItem::run(
             format!("{}  {}", loc, label),
-            move |_ctx| st.label_locale.set(Some(loc_s.clone())),
+            move |_ctx| locale.set(Some(loc_s.clone())),
             checked,
         ));
     }
@@ -538,90 +588,105 @@ pub fn open_install(state: &AppState, ctx: &mut EventCtx) {
 }
 
 pub fn open_rename(state: &AppState, ctx: &mut EventCtx) {
-    if state.current_info().is_none() || blocked_by_install(state, ctx) {
+    let Some(doc) = state.active_doc() else {
+        return;
+    };
+    if doc.current_info().is_none() || blocked_by_install(state, ctx, &doc) {
         return;
     }
-    crate::ui::rename::open(state);
+    crate::ui::rename::open(state, &doc);
 }
 
 pub fn open_settings(state: &AppState, ctx: &mut EventCtx) {
     crate::ui::settings::open(state, ctx);
 }
 
-/// 把解析结果写进状态（不含图标渲染）。
-pub fn apply_parsed(state: &AppState, loaded: apkinfo_core::load::Loaded) {
+/// 把解析结果写进文档（不含图标渲染）。
+pub fn apply_parsed(state: &AppState, doc: &Rc<Doc>, loaded: apkinfo_core::load::Loaded) {
     log::info!(
         "解析完成: {} ({} 个图标候选)",
         loaded.info.meta.package_name.as_deref().unwrap_or("?"),
         loaded.candidates.len()
     );
-    state.parse_error.set(String::new());
-    state.icon_candidates.set(loaded.candidates);
-    state.icon_index.set(0);
-    *state.session.borrow_mut() = Some(Arc::new(Mutex::new(loaded.session)));
-    state.info.set(vec![Rc::new(loaded.info)]);
+    doc.parse_error.set(String::new());
+    doc.icon_candidates.set(loaded.candidates);
+    doc.icon_index.set(0);
+    *doc.session.borrow_mut() = Some(Arc::new(Mutex::new(loaded.session)));
+    doc.subtitle.set(
+        loaded
+            .info
+            .meta
+            .package_name
+            .clone()
+            .unwrap_or_else(|| loaded.info.kind.display_name().to_string()),
+    );
+    doc.info.set(vec![Rc::new(loaded.info)]);
+    state.refresh_entries();
+}
+
+fn apply_parse_error(state: &AppState, doc: &Rc<Doc>, e: String) {
+    log::warn!("解析失败: {}", e);
+    doc.parse_error
+        .set(tr!("parse.failed_detail", error = e.clone()));
+    doc.subtitle.set(tr!("parse.failed"));
+    state.refresh_entries();
 }
 
 /// 同步加载（离屏截图模式用）：解析、首个图标、哈希、签名全部在当前线程完成，
 /// 这样 `--screenshot` 出的那一帧就是加载完成后的界面。
-pub fn load_sync(state: &AppState, path: PathBuf) {
-    state.next_generation();
-    state.clear_file_state();
-    state.file_path.set(Some(path.clone()));
-    state
-        .file_size
-        .set(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0));
+pub fn load_sync(state: &AppState, path: PathBuf) -> u64 {
+    let doc = Doc::new(state.next_generation(), path.clone());
+    state.add_doc(doc.clone());
     match apkinfo_core::load::load(&path) {
         Ok(loaded) => {
-            apply_parsed(state, loaded);
-            let candidates = state.icon_candidates.get();
-            if let Some(session) = state.session.borrow().clone() {
+            apply_parsed(state, &doc, loaded);
+            let candidates = doc.icon_candidates.get();
+            if let Some(session) = doc.session.borrow().clone() {
                 if let Ok(mut s) = session.lock() {
                     for (i, c) in candidates.iter().enumerate() {
                         if let Ok(img) = s.render(c, PREVIEW_ICON_SIZE, false) {
-                            state.icon_index.set(i);
-                            state.icon.set(vec![Rc::new(img)]);
+                            doc.icon_index.set(i);
+                            doc.icon.set(vec![Rc::new(img)]);
                             break;
                         }
                     }
                 }
             }
         }
-        Err(e) => state
-            .parse_error
-            .set(tr!("parse.failed_detail", error = e.to_string())),
+        Err(e) => apply_parse_error(state, &doc, e.to_string()),
     }
     if state.cfg(|c| c.enable_hash) {
         match apkinfo_core::hash::file_hashes(&path) {
             Ok((m, s)) => {
-                state.md5.set(m);
-                state.sha1.set(s);
-                state.hash_state.set(HashState::Done);
+                doc.md5.set(m);
+                doc.sha1.set(s);
+                doc.hash_state.set(HashState::Done);
             }
             Err(e) => {
-                state.hash_error.set(e.to_string());
-                state.hash_state.set(HashState::Failed);
+                doc.hash_error.set(e.to_string());
+                doc.hash_state.set(HashState::Failed);
             }
         }
     } else {
-        state.hash_state.set(HashState::Disabled);
+        doc.hash_state.set(HashState::Disabled);
     }
     if !state.cfg(|c| c.enable_signature) {
-        state.sig_state.set(SigState::Disabled);
+        doc.sig_state.set(SigState::Disabled);
     } else if ArchiveKind::from_path(&path).is_archive() {
-        state.sig_state.set(SigState::NotApplicable);
+        doc.sig_state.set(SigState::NotApplicable);
     } else {
         match apkinfo_core::signature::parse_file(&path) {
             Ok(sig) => {
-                state.signature.set(vec![Rc::new(sig)]);
-                state.sig_state.set(SigState::Done);
+                doc.signature.set(vec![Rc::new(sig)]);
+                doc.sig_state.set(SigState::Done);
             }
             Err(e) => {
-                state.sig_error.set(e);
-                state.sig_state.set(SigState::Failed);
+                doc.sig_error.set(e);
+                doc.sig_state.set(SigState::Failed);
             }
         }
     }
+    doc.id
 }
 
 // ---------------------------------------------------------------------------
@@ -630,25 +695,22 @@ pub fn load_sync(state: &AppState, path: PathBuf) {
 
 pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
     match msg {
-        Msg::OpenPath(p) => open_dropped(state, ctx, p),
+        Msg::OpenPaths(paths) => open_paths(state, ctx, paths),
         Msg::Parsed { gen, result } => {
-            if !state.is_current(gen) {
+            let Some(doc) = state.doc_by_gen(gen) else {
                 return;
-            }
-            state.parsing.set(false);
+            };
+            doc.parsing.set(false);
             match result {
                 Ok(loaded) => {
-                    apply_parsed(state, *loaded);
+                    apply_parsed(state, &doc, *loaded);
                     // 先渲染第一个候选；失败则依次尝试后面的（在 Msg::Icon 里接力）。
-                    if state.icon_candidates.with(|c| !c.is_empty()) {
-                        select_icon(state, 0);
+                    if doc.icon_candidates.with(|c| !c.is_empty()) {
+                        select_icon(state, &doc, 0);
                     }
                 }
                 Err(e) => {
-                    log::warn!("解析失败: {}", e);
-                    state
-                        .parse_error
-                        .set(tr!("parse.failed_detail", error = e.clone()));
+                    apply_parse_error(state, &doc, e);
                     ctx.toast_err(tr!("parse.failed"));
                 }
             }
@@ -659,24 +721,27 @@ pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
             index,
             result,
         } => {
-            if !state.is_current(gen) || token != state.icon_req.get() {
+            let Some(doc) = state.doc_by_gen(gen) else {
+                return;
+            };
+            if token != doc.icon_req.get() {
                 return;
             }
             match result {
                 Ok(img) => {
-                    state.icon_loading.set(false);
-                    state.icon_index.set(index);
-                    state.icon.set(vec![Rc::new(img)]);
+                    doc.icon_loading.set(false);
+                    doc.icon_index.set(index);
+                    doc.icon.set(vec![Rc::new(img)]);
                 }
                 Err(e) => {
                     log::warn!("图标渲染失败 #{}: {}", index, e);
                     // 首次加载链：当前还没有任何图标时自动试下一个候选。
-                    let count = state.icon_candidates.with(|c| c.len());
-                    let none_yet = state.icon.with(|v| v.is_empty());
+                    let count = doc.icon_candidates.with(|c| c.len());
+                    let none_yet = doc.icon.with(|v| v.is_empty());
                     if none_yet && index + 1 < count {
-                        select_icon(state, index + 1);
+                        select_icon(state, &doc, index + 1);
                     } else {
-                        state.icon_loading.set(false);
+                        doc.icon_loading.set(false);
                         if !none_yet {
                             ctx.toast_err(tr!("icon.render_failed"));
                         }
@@ -685,33 +750,33 @@ pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
             }
         }
         Msg::Hashes { gen, result } => {
-            if !state.is_current(gen) {
+            let Some(doc) = state.doc_by_gen(gen) else {
                 return;
-            }
+            };
             match result {
                 Ok((md5, sha1)) => {
-                    state.md5.set(md5);
-                    state.sha1.set(sha1);
-                    state.hash_state.set(HashState::Done);
+                    doc.md5.set(md5);
+                    doc.sha1.set(sha1);
+                    doc.hash_state.set(HashState::Done);
                 }
                 Err(e) => {
-                    state.hash_error.set(e);
-                    state.hash_state.set(HashState::Failed);
+                    doc.hash_error.set(e);
+                    doc.hash_state.set(HashState::Failed);
                 }
             }
         }
         Msg::Signature { gen, result } => {
-            if !state.is_current(gen) {
+            let Some(doc) = state.doc_by_gen(gen) else {
                 return;
-            }
+            };
             match result {
                 Ok(sig) => {
-                    state.signature.set(vec![Rc::new(sig)]);
-                    state.sig_state.set(SigState::Done);
+                    doc.signature.set(vec![Rc::new(sig)]);
+                    doc.sig_state.set(SigState::Done);
                 }
                 Err(e) => {
-                    state.sig_error.set(e);
-                    state.sig_state.set(SigState::Failed);
+                    doc.sig_error.set(e);
+                    doc.sig_state.set(SigState::Failed);
                 }
             }
         }
@@ -732,6 +797,8 @@ pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
             crate::Shortcut::Rename => open_rename(state, ctx),
             crate::Shortcut::Reparse => reparse(state, ctx),
             crate::Shortcut::Settings => open_settings(state, ctx),
+            crate::Shortcut::NextDoc => activate_neighbor(state, 1),
+            crate::Shortcut::PrevDoc => activate_neighbor(state, -1),
         },
     }
 }

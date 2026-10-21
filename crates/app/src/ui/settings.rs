@@ -140,9 +140,8 @@ impl Watcher {
             let w = self.title_width.0.get().round() as i32;
             state.update_config(|c| c.title_width = w);
             state.title_width.set(w);
-            // 字段行在构建期读宽度，重建一次信息区即可。
-            let cur = state.info.get();
-            state.info.set(cur);
+            // 字段行在构建期读宽度，重建一次当前文档的内容区即可。
+            state.touch_active();
         }
         let mut adb_changed = false;
         if changed(&mut self.adb_source) {

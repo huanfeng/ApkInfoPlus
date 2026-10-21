@@ -150,6 +150,8 @@ failed = "重命名失败: {error}"
 
 [install]
 title = "安装到设备"
+install_to_device = "安装到设备"
+doc_closed = "要安装的文件已关闭"
 select_device = "选择设备"
 no_devices = "未检测到设备，请连接设备并开启 USB 调试"
 no_adb = "未找到 adb，请在设置中配置 adb 路径或下载 platform-tools"
@@ -259,3 +261,9 @@ restore = "还原"
 minimize = "最小化"
 maximize = "最大化"
 close = "关闭"
+
+[sidebar]
+title = "已打开 ({count})"
+close_all = "全部关闭"
+search = "搜索文件名或包名…"
+open_count = "{count} 个文件"

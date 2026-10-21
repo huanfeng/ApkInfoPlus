@@ -150,6 +150,8 @@ failed = "Rename failed: {error}"
 
 [install]
 title = "Install to Device"
+install_to_device = "Install to device"
+doc_closed = "The file to install has been closed"
 select_device = "Select devices"
 no_devices = "No devices found. Connect a device and enable USB debugging"
 no_adb = "adb not found. Configure its path in Settings or download platform-tools"
@@ -259,3 +261,9 @@ restore = "Restore"
 minimize = "Minimize"
 maximize = "Maximize"
 close = "Close"
+
+[sidebar]
+title = "Open files ({count})"
+close_all = "Close all"
+search = "Search file or package name…"
+open_count = "{count} files"

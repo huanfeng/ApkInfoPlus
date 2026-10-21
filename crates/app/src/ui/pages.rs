@@ -13,10 +13,10 @@ use super::{
     copy_button, field_row, field_row_with, join_lines, mono_block, page, section,
     section_with_action,
 };
-use crate::state::{AppState, HashState, SigState};
+use crate::state::{AppState, Doc, HashState, SigState};
 
 /// 把标签页组装好。
-pub fn build_tabs(state: &AppState, info: Rc<ApkInfo>) -> Element {
+pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     let perm_count = info.meta.permissions.len();
     let split_count = info.splits.len() + info.obbs.len();
     let perm_title = if perm_count > 0 {
@@ -29,23 +29,39 @@ pub fn build_tabs(state: &AppState, info: Rc<ApkInfo>) -> Element {
     } else {
         tr!("tab.splits")
     };
+    let icon = crate::icons::gray;
     let mut pages = vec![
-        (tr!("tab.overview"), overview(state, info.clone())),
-        (perm_title, permissions(state, info.clone())),
+        (
+            tr!("tab.overview"),
+            icon("info"),
+            overview(state, info.clone()),
+        ),
+        (perm_title, icon("key"), permissions(&doc, info.clone())),
     ];
     if info.is_archive() {
-        pages.push((split_title, splits(state, info.clone())));
+        pages.push((split_title, icon("layers"), splits(state, info.clone())));
     }
-    pages.push((tr!("tab.signature"), signature(state, info.clone())));
-    pages.push((tr!("tab.hashes"), hashes(state)));
-    pages.push((tr!("tab.text_info"), text_info(state, info.clone())));
+    pages.push((
+        tr!("tab.signature"),
+        icon("shield"),
+        signature(state, &doc, info.clone()),
+    ));
+    pages.push((tr!("tab.hashes"), icon("hash"), hashes(state, &doc)));
+    pages.push((
+        tr!("tab.text_info"),
+        icon("file_text"),
+        text_info(state, info.clone()),
+    ));
 
     // 标签数因归档包而变，选中索引越界时回到概览。
     let count = pages.len();
-    if state.tab.get() >= count {
-        state.tab.set(0);
+    if doc.tab.get() >= count {
+        doc.tab.set(0);
     }
-    Element::tabs(state.tab, pages).fill()
+    Element::col()
+        .fill()
+        .padding_edges(Insets::new(super::PAGE_PAD, 10, super::PAGE_PAD, 0))
+        .child(Element::tabs_icons(doc.tab, pages).fill())
 }
 
 fn overview(state: &AppState, info: Rc<ApkInfo>) -> Element {
@@ -205,9 +221,9 @@ fn overview(state: &AppState, info: Rc<ApkInfo>) -> Element {
     page(col)
 }
 
-fn permissions(state: &AppState, info: Rc<ApkInfo>) -> Element {
+fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
     let all = info.meta.permissions.clone();
-    let filter = state.permission_filter;
+    let filter = doc.permission_filter;
     let all_for_list = all.clone();
     let filtered: Signal<Vec<String>> = Signal::map(filter, move |f| {
         let f = f.trim().to_lowercase();
@@ -426,9 +442,9 @@ fn splits(state: &AppState, info: Rc<ApkInfo>) -> Element {
     )
 }
 
-fn signature(state: &AppState, info: Rc<ApkInfo>) -> Element {
-    let sig_state = state.sig_state;
-    let sig_error = state.sig_error;
+fn signature(state: &AppState, doc: &Doc, info: Rc<ApkInfo>) -> Element {
+    let sig_state = doc.sig_state;
+    let sig_error = doc.sig_error;
     let st = state.clone();
 
     let status = Element::col()
@@ -457,7 +473,7 @@ fn signature(state: &AppState, info: Rc<ApkInfo>) -> Element {
         );
 
     let cards = Element::host_signal(
-        state.signature,
+        doc.signature,
         move |sig: Rc<apkinfo_core::info::SignatureInfo>| {
             let mut col = Element::col().width_match().spacing(14);
             let mut schemes = Element::row().cross(Align::Center).spacing(6);
@@ -561,11 +577,11 @@ fn signature(state: &AppState, info: Rc<ApkInfo>) -> Element {
     )
 }
 
-fn hashes(state: &AppState) -> Element {
-    let hs = state.hash_state;
-    let err = state.hash_error;
-    let md5 = state.md5;
-    let sha1 = state.sha1;
+fn hashes(state: &AppState, doc: &Doc) -> Element {
+    let hs = doc.hash_state;
+    let err = doc.hash_error;
+    let md5 = doc.md5;
+    let sha1 = doc.sha1;
     let st = state.clone();
 
     let row = |title: &'static str, sig: Signal<String>| {

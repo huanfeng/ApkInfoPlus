@@ -28,12 +28,9 @@ fn main() {
     // 上次强退可能留下几 GB 的 OBB 解压目录
     apkinfo_core::installer::cleanup_stale_temp_dirs();
 
-    // 命令行里第一个存在的文件就是要打开的；其余参数（--screenshot 等）留给 windui。
+    // 命令行里存在的受支持文件全部打开；其余参数（--screenshot 等）留给 windui。
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let initial_file: Option<PathBuf> = args
-        .iter()
-        .map(PathBuf::from)
-        .find(|p| p.is_file() && actions::is_supported_file(p));
+    let initial_files: Vec<PathBuf> = supported_files(&args);
     let screenshot_mode = args.iter().any(|a| a == "--screenshot");
     // `--lang zh-CN`：调试 / 截图时强制语言，不写进配置。
     let lang_override = args
@@ -97,16 +94,13 @@ fn main() {
     let state = AppState::new(cfg, tx.clone(), theme_handle, locale_handle);
     *state_slot.borrow_mut() = Some(state.clone());
 
-    // 第二个实例：把它的参数里第一个受支持的文件转给我们。
+    // 第二个实例：把它的参数里受支持的文件转给我们。
     {
         let tx = tx.clone();
         app = app.single_instance(APP_ID, move |argv| {
-            if let Some(p) = argv
-                .iter()
-                .map(PathBuf::from)
-                .find(|p| p.is_file() && actions::is_supported_file(p))
-            {
-                let _ = tx.send(Msg::OpenPath(p));
+            let files = supported_files(argv.as_slice());
+            if !files.is_empty() {
+                let _ = tx.send(Msg::OpenPaths(files));
             }
         });
     }
@@ -155,6 +149,15 @@ fn main() {
                     let _ = tx.send(Msg::Shortcut(Shortcut::Rename));
                     true
                 }
+                Key::Tab if ctrl => {
+                    let s = if ev.shift {
+                        Shortcut::PrevDoc
+                    } else {
+                        Shortcut::NextDoc
+                    };
+                    let _ = tx.send(Msg::Shortcut(s));
+                    true
+                }
                 Key::Escape => {
                     // 有对话框时先关对话框；否则交给默认行为（关窗，安装中由 on_close_request 拦）。
                     if st.show_rename.get() {
@@ -181,11 +184,19 @@ fn main() {
         });
     }
 
-    if let Some(p) = initial_file {
+    if !initial_files.is_empty() {
         if screenshot_mode {
-            actions::load_sync(&state, p);
+            // 截图模式：同步加载，且与真实打开一样让第一个文件成为当前文档。
+            let mut first = None;
+            for p in initial_files {
+                let id = actions::load_sync(&state, p);
+                first.get_or_insert(id);
+            }
+            if let Some(id) = first {
+                state.set_active(id);
+            }
         } else {
-            let _ = tx.send(Msg::OpenPath(p));
+            let _ = tx.send(Msg::OpenPaths(initial_files));
         }
     }
 
@@ -207,6 +218,14 @@ fn app_icon() -> windui::icon::IconSource {
     }
 }
 
+/// 参数里存在且受支持的文件，保持顺序。
+fn supported_files(args: &[String]) -> Vec<PathBuf> {
+    args.iter()
+        .map(PathBuf::from)
+        .filter(|p| p.is_file() && actions::is_supported_file(p))
+        .collect()
+}
+
 /// 快捷键意图，经消息通道到有 ctx 的地方执行。
 #[derive(Debug, Clone, Copy)]
 pub enum Shortcut {
@@ -216,4 +235,6 @@ pub enum Shortcut {
     Rename,
     Reparse,
     Settings,
+    NextDoc,
+    PrevDoc,
 }
