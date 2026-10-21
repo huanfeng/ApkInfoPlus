@@ -78,6 +78,7 @@ pub fn make_theme(cfg: &Config, system_dark: bool) -> Theme {
     // 圆角统一偏大一点：卡片 12、控件 8。
     theme.metrics.corner_md = 8.0;
     theme.metrics.corner_lg = 12.0;
+    theme.button.corner = Some(8.0);
     // 设置页表单行：标题略大一点，与主窗字段行统一。
     theme.form.label_size = Some(13.5);
     theme.form.desc_size = Some(12.0);

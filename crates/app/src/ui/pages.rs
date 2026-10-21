@@ -451,7 +451,7 @@ fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
             let joined = join_lines(&all);
             Element::button(t!("action.copy_all"))
                 .small()
-                .outline()
+                .outline_soft()
                 .neutral()
                 .enabled(!all.is_empty())
                 .on_click(move |ctx| {
@@ -582,7 +582,7 @@ fn splits(state: &AppState, info: Rc<ApkInfo>) -> Element {
         Some(
             Element::button(t!("action.copy_all"))
                 .small()
-                .outline()
+                .outline_soft()
                 .neutral()
                 .enabled(!info.splits.is_empty())
                 .on_click(move |ctx| {
@@ -867,7 +867,7 @@ fn text_info(state: &AppState, info: Rc<ApkInfo>) -> Element {
                 .child(
                     Element::button(t!("action.copy_all"))
                         .small()
-                        .outline()
+                        .outline_soft()
                         .neutral()
                         .on_click(move |ctx| {
                             ctx.clipboard_set(&copy_text);

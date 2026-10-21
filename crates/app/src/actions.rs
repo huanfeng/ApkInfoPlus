@@ -21,6 +21,8 @@ use crate::ui::shorten;
 const EXPORT_ICON_SIZE: u32 = 1024;
 /// 预览渲染尺寸（高 DPI 下 96 逻辑像素最多需要 ~200 物理像素，取 256 留余量）。
 const PREVIEW_ICON_SIZE: u32 = 256;
+/// 「最近打开」保留的条数。
+const RECENT_MAX: usize = 15;
 
 // ---------------------------------------------------------------------------
 // 后台线程：panic 兜底
@@ -143,10 +145,15 @@ pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) -> Option<
         state.set_active(doc.id);
         return Some(doc);
     }
-    if let Some(dir) = path.parent() {
-        let dir = dir.display().to_string();
-        state.update_config(|c| c.last_dir = dir);
-    }
+    let shown = path.display().to_string();
+    state.update_config(|c| {
+        if let Some(dir) = path.parent() {
+            c.last_dir = dir.display().to_string();
+        }
+        c.recent_files.retain(|p| *p != shown);
+        c.recent_files.insert(0, shown.clone());
+        c.recent_files.truncate(RECENT_MAX);
+    });
     log::info!("打开文件: {}", path.display());
     let doc = Doc::new(state.next_generation(), path);
     state.add_doc(doc.clone());
@@ -644,17 +651,42 @@ pub fn more_menu_items(state: &AppState, doc: &Rc<Doc>) -> Vec<MenuItem> {
     items
 }
 
-/// 标题栏的明暗开关：浅 ↔ 深（「跟随系统」按当前实际明暗翻到另一边）。
-pub fn toggle_theme(state: &AppState) {
-    let dark_now = state.cfg(|c| crate::theme::is_dark(c, windui::event::system_prefers_dark()));
-    state.update_config(|c| {
-        c.theme_mode = if dark_now {
-            crate::config::ThemeMode::Light
-        } else {
-            crate::config::ThemeMode::Dark
-        };
-    });
-    crate::ui::settings::apply_theme(state);
+/// 侧栏「最近打开」菜单：按时间倒序列出，已不存在的置灰；末尾可清空。
+pub fn recent_menu_items(state: &AppState) -> Vec<MenuItem> {
+    let recent = state.cfg(|c| c.recent_files.clone());
+    let mut items = Vec::new();
+    if recent.is_empty() {
+        items.push(MenuItem::run(tr!("field.none"), |_| {}, false).enabled(false));
+    }
+    for p in recent {
+        let path = PathBuf::from(&p);
+        let exists = path.is_file();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.clone());
+        let st = state.clone();
+        items.push(
+            MenuItem::run(
+                name,
+                move |ctx| {
+                    open_paths(&st, ctx, vec![path.clone()]);
+                },
+                false,
+            )
+            .enabled(exists),
+        );
+    }
+    items.push(MenuItem::separator());
+    {
+        let st = state.clone();
+        items.push(MenuItem::run(
+            tr!("sidebar.clear_recent"),
+            move |_| st.update_config(|c| c.recent_files.clear()),
+            false,
+        ));
+    }
+    items
 }
 
 // ---------------------------------------------------------------------------

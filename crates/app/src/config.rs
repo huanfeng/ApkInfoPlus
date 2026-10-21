@@ -68,6 +68,8 @@ pub struct Config {
     pub sidebar_ratio: f32,
     /// 上次打开的目录，文件对话框从这里开始。
     pub last_dir: String,
+    /// 最近打开的文件（最新在前，最多 15 条）。
+    pub recent_files: Vec<String>,
     /// 安装对话框的高级选项，记住上次勾选。
     pub install_allow_test: bool,
     pub install_allow_downgrade: bool,
@@ -92,6 +94,7 @@ impl Default for Config {
             window_height: 760,
             sidebar_ratio: 0.22,
             last_dir: String::new(),
+            recent_files: Vec::new(),
             install_allow_test: false,
             install_allow_downgrade: false,
             install_replace: true,

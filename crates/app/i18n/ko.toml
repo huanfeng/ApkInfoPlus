@@ -6,7 +6,6 @@ name = "한국어"
 title = "APK Info Plus"
 
 [action]
-toggle_theme = "라이트 / 다크 전환"
 more = "더 보기"
 open_apk = "APK 열기"
 open = "열기"
@@ -277,6 +276,9 @@ maximize = "최대화"
 close = "닫기"
 
 [sidebar]
+recent = "최근 파일"
+clear_recent = "최근 파일 지우기"
+open_file = "파일 열기"
 title = "열린 파일 ({count})"
 close_all = "모두 닫기"
 search = "파일명 또는 패키지명 검색…"

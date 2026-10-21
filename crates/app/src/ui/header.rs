@@ -24,14 +24,13 @@ pub fn build(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             Element::row()
                 .width_match()
                 .cross(Align::Start)
-                .spacing(20)
-                .padding(20)
+                .spacing(18)
+                .padding(16)
                 .bg_role(Role::Surface)
                 .corner(super::CARD_CORNER)
                 .border_role(Role::Border, 1)
                 .child(icon_block(state, doc.clone()))
-                .child(text_block(doc.clone(), info.clone()).weight(1.0))
-                .child(action_block(state, doc)),
+                .child(text_block(state, doc.clone(), info.clone()).weight(1.0)),
         )
 }
 
@@ -122,7 +121,7 @@ fn icon_block(state: &AppState, doc: Rc<Doc>) -> Element {
         .child(nav)
 }
 
-fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
+fn text_block(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     let meta = &info.meta;
 
     // 应用名随语言选择变化：派生信号，读 label_locale 现算。
@@ -157,10 +156,11 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
                 .on_click(move |ctx| actions::show_label_menu(&d, ctx)),
         );
     }
-    name_row = name_row.child(Element::badge_intent(
-        info.kind.display_name(),
-        Intent::Neutral,
-    ));
+    // 操作按钮只跟应用名占同一行，右对齐；下面各行用整个宽度，不被挤。
+    name_row = name_row
+        .child(super::kind_badge(info.kind))
+        .child(Element::flex_spacer())
+        .child(action_block(state, doc.clone()));
 
     let package = meta.package_name.clone().unwrap_or_default();
     let package_row = Element::row()
@@ -265,7 +265,7 @@ fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
             Element::button(t!("action.reparse"))
                 .icon_content(icons::gray("refresh"))
                 .neutral()
-                .outline()
+                .outline_soft()
                 .tooltip("F5")
                 .enabled_when(move || !parsing.get())
                 .on_click({
@@ -278,7 +278,7 @@ fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
             Element::button(t!("action.rename"))
                 .icon_content(icons::gray("pencil"))
                 .neutral()
-                .outline()
+                .outline_soft()
                 .tooltip("F2")
                 .on_click({
                     let st = st.clone();
@@ -289,7 +289,7 @@ fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
             Element::button(t!("action.more"))
                 .icon_content(icons::gray("more"))
                 .neutral()
-                .outline()
+                .outline_soft()
                 .on_click({
                     let st = st.clone();
                     let d = doc.clone();

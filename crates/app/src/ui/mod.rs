@@ -15,11 +15,11 @@ use windui::ui::inputs::TextInput;
 use crate::state::AppState;
 
 /// 内容区四周留白。
-pub const PAGE_PAD: i32 = 16;
+pub const PAGE_PAD: i32 = 12;
 /// 卡片之间的间距。
 pub const CARD_GAP: i32 = 12;
 /// 卡片内边距。
-pub const CARD_PAD: i32 = 16;
+pub const CARD_PAD: i32 = 14;
 /// 滚动容器右侧额外留白：windui 的滚动条压在内容之上（约 10px），不让位就会盖住行尾。
 pub const SCROLL_GUTTER: i32 = 10;
 /// 卡片圆角。
@@ -38,10 +38,63 @@ pub fn selectable_signal(text: Signal<String>) -> Element {
     Element::text_input(text, "")
         .read_only()
         .frameless()
+        // 光标放在开头：超长内容默认露出头部而不是尾部。
+        .select_range(0, 0)
         .font_size(13.0)
         .fg_role(Role::Text)
         .width_match()
         .height(VALUE_H)
+}
+
+/// 文件格式徽章：APK / XAPK / APKM / APKS 各一种固定颜色，侧栏与概览头共用。
+pub fn kind_badge(kind: apkinfo_core::info::ArchiveKind) -> Element {
+    use apkinfo_core::info::ArchiveKind;
+    let color = match kind {
+        ArchiveKind::Apk => crate::theme::CARD_BLUE,
+        ArchiveKind::Xapk => crate::theme::CARD_PURPLE,
+        ArchiveKind::Apkm => crate::theme::CARD_ORANGE,
+        ArchiveKind::Apks => crate::theme::CARD_GREEN,
+        _ => crate::icons::ICON_GRAY,
+    };
+    Element::badge_intent(kind.display_name(), Intent::Custom(color))
+}
+
+/// 子窗口的自绘标题栏（与主窗同一套）：图标 + 标题 + 关闭。macOS 用系统标题栏，原样返回。
+pub fn window_chrome(title: impl Into<TextContent>, body: Element) -> Element {
+    if cfg!(target_os = "macos") {
+        return body;
+    }
+    let bar = Element::row()
+        .width_match()
+        .height(40)
+        .cross(Align::Stretch)
+        .bg_role(Role::Surface)
+        .window_drag()
+        .child(
+            Element::row()
+                .cross(Align::Center)
+                .spacing(8)
+                .padding_edges(Insets::new(14, 0, 0, 0))
+                .child(
+                    Element::image_content(ImageContent::from_bytes(include_bytes!(
+                        "../../assets/icon.png"
+                    )))
+                    .size(18, 18),
+                )
+                .child(
+                    Element::label(title)
+                        .font_size(14.0)
+                        .font_weight(600)
+                        .fg_role(Role::Text),
+                )
+                .weight(1.0),
+        )
+        .child(Element::window_button(WindowButtonKind::Close).fg_role(Role::TextMuted));
+    Element::col()
+        .fill()
+        .child(bar)
+        .child(Element::divider())
+        .child(body.weight(1.0))
 }
 
 /// 多行版本：`lines` 为显示行数（内容更多时可滚动）。

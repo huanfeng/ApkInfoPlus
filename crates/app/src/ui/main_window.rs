@@ -15,7 +15,7 @@ use crate::icons;
 use crate::state::{AppState, Doc, DocEntry};
 
 /// 标题栏高度。
-const TITLE_H: i32 = 48;
+const TITLE_H: i32 = 40;
 
 pub fn build(state: &AppState) -> Element {
     let st = state.clone();
@@ -34,13 +34,9 @@ pub fn build(state: &AppState) -> Element {
         .child(rename::build_dialog(state))
 }
 
-/// 自绘标题栏：logo + 应用名 | 搜索框 | 打开 | … | 设置 · 明暗 | 窗口按钮。
-/// macOS 保留系统标题栏（红绿灯在左上），这一条就只当工具栏用，不放窗口按钮。
-fn title_bar(state: &AppState) -> Element {
-    let st = state.clone();
-    let filter = state.sidebar_filter;
-    let docs = state.docs;
-
+/// 自绘标题栏：logo + 应用名 + 版本号 | 窗口按钮。功能都在侧栏里，这一条只管拖动与窗口操作。
+/// macOS 保留系统标题栏（红绿灯在左上），这一条就只剩应用名。
+fn title_bar(_state: &AppState) -> Element {
     let left = Element::row()
         .cross(Align::Center)
         .spacing(10)
@@ -58,47 +54,11 @@ fn title_bar(state: &AppState) -> Element {
                 .fg_role(Role::Text),
         )
         .child(
-            Element::text_input(filter, t!("sidebar.search"))
-                .width(300)
-                .margin_xy(12, 0)
-                .enabled_when(move || docs.with(|v| !v.is_empty())),
-        )
-        .child(
-            Element::button(t!("action.open_apk"))
-                .icon_content(icons::gray("folder_open"))
-                .small()
-                .neutral()
-                .outline()
-                .tooltip("Ctrl+O")
-                .on_click({
-                    let st = st.clone();
-                    move |ctx| actions::pick_file(&st, ctx)
-                }),
+            Element::label(format!("v{}", env!("CARGO_PKG_VERSION")))
+                .font_size(12.0)
+                .fg_role(Role::TextSubtle),
         )
         .weight(1.0);
-
-    let dark = state.cfg(|c| crate::theme::is_dark(c, windui::event::system_prefers_dark()));
-    let right = Element::row()
-        .cross(Align::Center)
-        .spacing(2)
-        .padding_edges(Insets::new(0, 0, 6, 0))
-        .child(
-            icons::button("settings", 32, tr!("action.settings")).on_click({
-                let st = st.clone();
-                move |ctx| actions::open_settings(&st, ctx)
-            }),
-        )
-        .child(
-            icons::button(
-                if dark { "sun" } else { "moon" },
-                32,
-                tr!("action.toggle_theme"),
-            )
-            .on_click({
-                let st = st.clone();
-                move |_| actions::toggle_theme(&st)
-            }),
-        );
 
     let mut bar = Element::row()
         .width_match()
@@ -106,18 +66,9 @@ fn title_bar(state: &AppState) -> Element {
         .cross(Align::Stretch)
         .bg_role(Role::Bg)
         .window_drag()
-        .child(left)
-        .child(right);
+        .child(left);
     if !cfg!(target_os = "macos") {
         bar = bar
-            .child(
-                Element::col()
-                    .width(1)
-                    .height(18)
-                    .bg_role(Role::Border)
-                    .align(Align::Center)
-                    .margin_xy(6, 0),
-            )
             .child(Element::window_button(WindowButtonKind::Minimize).fg_role(Role::TextMuted))
             .child(Element::window_button(WindowButtonKind::Maximize).fg_role(Role::TextMuted))
             .child(Element::window_button(WindowButtonKind::Close).fg_role(Role::TextMuted));
@@ -154,16 +105,44 @@ fn body(state: &AppState) -> Element {
 fn sidebar(state: &AppState) -> Element {
     let st = state.clone();
     let docs = state.docs;
+    let filter = state.sidebar_filter;
+
+    // 顶部导航：打开 / 最近打开 / 设置。
+    let nav = Element::col()
+        .width_match()
+        .padding_edges(Insets::new(8, 8, 8, 4))
+        .spacing(2)
+        .child(
+            nav_item("folder_open", t!("sidebar.open_file"), Some("Ctrl+O")).on_click({
+                let st = st.clone();
+                move |ctx| actions::pick_file(&st, ctx)
+            }),
+        )
+        .child(nav_item("history", t!("sidebar.recent"), None).on_click({
+            let st = st.clone();
+            move |ctx| {
+                let items = actions::recent_menu_items(&st);
+                let mut req = windui::event::MenuRequest::below(ctx.bounds(), items);
+                req.click_through = false;
+                ctx.show_menu_request(req);
+            }
+        }))
+        .child(
+            nav_item("settings", t!("action.settings"), Some("Ctrl+,")).on_click({
+                let st = st.clone();
+                move |ctx| actions::open_settings(&st, ctx)
+            }),
+        );
 
     let head = Element::row()
         .width_match()
         .cross(Align::Center)
-        .padding_edges(Insets::new(16, 12, 12, 4))
+        .padding_edges(Insets::new(16, 10, 12, 4))
         .child(
             Element::label(Signal::map(docs, |v| {
                 tr!("sidebar.title", count = v.len() as i64)
             }))
-            .font_size(13.0)
+            .font_size(12.5)
             .font_weight(600)
             .fg_role(Role::TextMuted)
             .weight(1.0),
@@ -171,7 +150,7 @@ fn sidebar(state: &AppState) -> Element {
         .child(
             Element::link(t!("sidebar.close_all"))
                 .font_size(12.5)
-                .enabled_when(move || docs.with(|v| v.len() > 1))
+                .enabled_when(move || docs.with(|v| !v.is_empty()))
                 .on_click({
                     let st = st.clone();
                     move |ctx| actions::close_all(&st, ctx)
@@ -186,11 +165,45 @@ fn sidebar(state: &AppState) -> Element {
     .padding_edges(Insets::new(8, 2, 8, 8))
     .spacing(2);
 
+    let search = Element::text_input(filter, t!("sidebar.search"))
+        .width_match()
+        .margin_xy(10, 8);
+
     Element::col()
         .height_match()
         .bg_role(Role::Surface)
+        .child(nav)
+        .child(Element::divider().margin_xy(12, 2))
         .child(head)
         .child(Element::scroll().width_match().weight(1.0).child(list))
+        .child(Element::divider().margin_xy(12, 0))
+        .child(search)
+}
+
+/// 侧栏导航项：图标 + 文字的扁平行。
+fn nav_item(icon: &str, label: impl Into<TextContent>, shortcut: Option<&str>) -> Element {
+    let mut row = Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(10)
+        .padding_xy(12, 8)
+        .corner(8.0)
+        .clickable()
+        .child(Element::image_content(icons::gray(icon)).size(18, 18))
+        .child(
+            Element::label(label)
+                .font_size(13.5)
+                .fg_role(Role::Text)
+                .weight(1.0),
+        );
+    if let Some(k) = shortcut {
+        row = row.child(
+            Element::label(k.to_string())
+                .font_size(11.5)
+                .fg_role(Role::TextSubtle),
+        );
+    }
+    row
 }
 
 fn doc_row(state: &AppState, entry: DocEntry) -> Element {
@@ -246,9 +259,10 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
         .child(placeholder)
         .child(image);
 
-    let texts = Element::col()
-        .weight(1.0)
-        .spacing(2)
+    let mut title_row = Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(6)
         .child(
             Element::label(title.clone())
                 .font_size(13.5)
@@ -256,8 +270,15 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
                 .fg_role(Role::Text)
                 .max_lines(1)
                 .truncate(Truncate::End)
-                .width_match(),
-        )
+                .weight(1.0),
+        );
+    if let Some(i) = &info {
+        title_row = title_row.child(super::kind_badge(i.kind));
+    }
+    let texts = Element::col()
+        .weight(1.0)
+        .spacing(2)
+        .child(title_row)
         .child(
             Element::label(subtitle.clone())
                 .font_size(12.0)
@@ -367,7 +388,7 @@ fn pending_panel(state: &AppState, doc: Rc<Doc>) -> Element {
             Element::button(t!("action.reparse"))
                 .small()
                 .neutral()
-                .outline()
+                .outline_soft()
                 .visible_when(move || !parsing.get())
                 .on_click({
                     let doc = doc.clone();

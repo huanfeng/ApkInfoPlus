@@ -6,7 +6,6 @@ name = "English"
 title = "APK Info Plus"
 
 [action]
-toggle_theme = "Toggle light / dark"
 more = "More"
 open_apk = "Open APK"
 open = "Open"
@@ -277,6 +276,9 @@ maximize = "Maximize"
 close = "Close"
 
 [sidebar]
+recent = "Recent"
+clear_recent = "Clear recent files"
+open_file = "Open file"
 title = "Open files ({count})"
 close_all = "Close all"
 search = "Search file or package name…"

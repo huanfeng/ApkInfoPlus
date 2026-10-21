@@ -7,7 +7,6 @@ fallback = "zh-CN"
 title = "APK Info Plus"
 
 [action]
-toggle_theme = "切換明暗"
 more = "更多"
 open_apk = "開啟 APK"
 open = "開啟"
@@ -278,6 +277,9 @@ maximize = "最大化"
 close = "關閉"
 
 [sidebar]
+recent = "最近開啟"
+clear_recent = "清空最近開啟"
+open_file = "開啟檔案"
 title = "已開啟 ({count})"
 close_all = "全部關閉"
 search = "搜尋檔名或套件名…"

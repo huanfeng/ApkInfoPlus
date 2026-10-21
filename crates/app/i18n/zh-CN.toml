@@ -6,7 +6,6 @@ name = "简体中文"
 title = "APK Info Plus"
 
 [action]
-toggle_theme = "切换明暗"
 more = "更多"
 open_apk = "打开 APK"
 open = "打开"
@@ -277,6 +276,9 @@ maximize = "最大化"
 close = "关闭"
 
 [sidebar]
+recent = "最近打开"
+clear_recent = "清空最近打开"
+open_file = "打开文件"
 title = "已打开 ({count})"
 close_all = "全部关闭"
 search = "搜索文件名或包名…"

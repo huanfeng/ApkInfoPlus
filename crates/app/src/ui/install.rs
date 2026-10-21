@@ -144,10 +144,11 @@ fn window(state: &AppState) -> WindowRequest {
     let st = state.clone();
     let installing = state.install.installing;
     let confirm = state.install.confirm_stop;
-    Window::new(tr!("install.title"), 680, 640)
+    Window::new(tr!("install.title"), 680, 660)
         .single("install")
         .centered(true)
-        .min_size(560, 480)
+        .min_size(560, 500)
+        .frameless(!cfg!(target_os = "macos"))
         .title(t!("install.title"))
         // 安装中关窗：不直接关，弹「确认停止」；停下来之后窗口留着看结果，用户再关。
         .on_close_request(move |_ctx| {
@@ -366,7 +367,7 @@ fn build_window(state: &AppState) -> Element {
         .width_match()
         .cross(Align::Center)
         .spacing(8)
-        .padding_edges(Insets::new(super::PAGE_PAD, 14, super::PAGE_PAD, 6))
+        .padding_edges(Insets::new(super::PAGE_PAD, 10, super::PAGE_PAD, 4))
         .child(
             Element::image_content(crate::icons::content("package", crate::icons::ICON_GRAY))
                 .size(18, 18),
@@ -406,7 +407,7 @@ fn build_window(state: &AppState) -> Element {
             Element::button(t!("action.refresh"))
                 .small()
                 .neutral()
-                .outline()
+                .outline_soft()
                 .enabled_when({
                     let loading = ins.loading_devices;
                     move || !installing.get() && !loading.get()
@@ -421,7 +422,7 @@ fn build_window(state: &AppState) -> Element {
             Element::button(t!("action.close"))
                 .small()
                 .neutral()
-                .outline()
+                .outline_soft()
                 .visible_when(move || !installing.get())
                 .on_click(move |ctx| ctx.request_close()),
         )
@@ -429,7 +430,7 @@ fn build_window(state: &AppState) -> Element {
             Element::button(t!("install.stop"))
                 .small()
                 .danger()
-                .outline()
+                .outline_soft()
                 .visible_when(move || installing.get())
                 .on_click({
                     let confirm = ins.confirm_stop;
@@ -495,7 +496,7 @@ fn build_window(state: &AppState) -> Element {
                         Element::button(t!("action.cancel"))
                             .small()
                             .neutral()
-                            .outline()
+                            .outline_soft()
                             .on_click(move |_| confirm.set(false)),
                     )
                     .child(
@@ -510,7 +511,10 @@ fn build_window(state: &AppState) -> Element {
             ),
     );
 
-    Element::stack().fill().child(page).child(confirm_dialog)
+    Element::stack()
+        .fill()
+        .child(super::window_chrome(tr!("install.title"), page))
+        .child(confirm_dialog)
 }
 
 fn device_section(state: &AppState) -> Element {
@@ -708,7 +712,7 @@ fn splits_section(state: &AppState) -> Element {
             Element::button(t!("install.select_all"))
                 .small()
                 .neutral()
-                .outline()
+                .outline_soft()
                 // 先把行拷出来再写：`with` 期间信号仓持共享借用，闭包里再 set 会撞 RefCell 借用而 panic
                 .on_click(move |_| {
                     for s in splits.get() {
@@ -720,7 +724,7 @@ fn splits_section(state: &AppState) -> Element {
             Element::button(t!("install.base_only"))
                 .small()
                 .neutral()
-                .outline()
+                .outline_soft()
                 .on_click(move |_| {
                     for s in splits.get() {
                         s.selected.set(s.kind == SplitType::Base);
@@ -731,7 +735,7 @@ fn splits_section(state: &AppState) -> Element {
             Element::button(t!("install.base_and_language"))
                 .small()
                 .neutral()
-                .outline()
+                .outline_soft()
                 .on_click(move |_| {
                     for s in splits.get() {
                         s.selected

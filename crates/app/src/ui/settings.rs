@@ -71,10 +71,11 @@ pub fn on_download_event(state: &AppState, ctx: &mut EventCtx, ev: DownloadEvent
 pub fn open(state: &AppState, ctx: &mut EventCtx) {
     let st = state.clone();
     ctx.open_window(
-        Window::new(tr!("settings.title"), 760, 540)
+        Window::new(tr!("settings.title"), 760, 560)
             .single("settings")
             .centered(true)
-            .min_size(640, 440)
+            .min_size(640, 460)
+            .frameless(!cfg!(target_os = "macos"))
             .title(t!("settings.title"))
             .on_interval(std::time::Duration::from_millis(120), {
                 let st = st.clone();
@@ -88,7 +89,7 @@ pub fn open(state: &AppState, ctx: &mut EventCtx) {
                     }
                 }
             })
-            .content(move || build(&st)),
+            .content(move || super::window_chrome(tr!("settings.title"), build(&st))),
     );
 }
 
@@ -274,7 +275,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("action.reset"))
                                 .small()
                                 .neutral()
-                                .outline()
+                                .outline_soft()
                                 .on_click({
                                     let st = st.clone();
                                     move |_| {
@@ -357,7 +358,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("settings.open_debug_log"))
                                 .small()
                                 .neutral()
-                                .outline()
+                                .outline_soft()
                                 .on_click(|ctx| {
                                     let p = crate::config::log_path();
                                     if let Err(e) = actions::reveal_in_file_manager(&p) {
@@ -369,7 +370,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("settings.open_data_dir"))
                                 .small()
                                 .neutral()
-                                .outline()
+                                .outline_soft()
                                 .on_click(|ctx| {
                                     let p = crate::config::data_dir();
                                     let _ = std::fs::create_dir_all(&p);
@@ -421,7 +422,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("action.browse"))
                                 .small()
                                 .neutral()
-                                .outline()
+                                .outline_soft()
                                 .on_click({
                                     move |ctx| {
                                         let dlg =
@@ -453,7 +454,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("settings.auto_detect"))
                                 .small()
                                 .neutral()
-                                .outline()
+                                .outline_soft()
                                 .on_click({
                                     let st = st.clone();
                                     move |_| {
@@ -495,7 +496,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("action.browse"))
                                 .small()
                                 .neutral()
-                                .outline()
+                                .outline_soft()
                                 .on_click({
                                     let st = st.clone();
                                     move |ctx| {
@@ -518,7 +519,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("action.reset"))
                                 .small()
                                 .neutral()
-                                .outline()
+                                .outline_soft()
                                 .on_click({
                                     let st = st.clone();
                                     move |_| {
@@ -534,7 +535,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("settings.open_download_dir"))
                                 .small()
                                 .neutral()
-                                .outline()
+                                .outline_soft()
                                 .on_click({
                                     let st = st.clone();
                                     move |ctx| {
@@ -569,7 +570,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("action.stop"))
                                 .small()
                                 .danger()
-                                .outline()
+                                .outline_soft()
                                 .visible_when({
                                     let running = dl.running;
                                     move || running.get()
@@ -587,7 +588,7 @@ fn build(state: &AppState) -> Element {
                             Element::button(t!("settings.delete_downloads"))
                                 .small()
                                 .danger()
-                                .outline()
+                                .outline_soft()
                                 .enabled_when({
                                     let running = dl.running;
                                     move || !running.get()

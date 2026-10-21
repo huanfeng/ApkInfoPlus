@@ -169,7 +169,7 @@ pub fn build_dialog(state: &AppState) -> Element {
         Element::button(t!(label))
             .small()
             .neutral()
-            .outline()
+            .outline_soft()
             .on_click(move |_| {
                 if let Some(doc) = target_doc(&st) {
                     st.rename.name.set(preset(&doc, which));
@@ -224,7 +224,7 @@ pub fn build_dialog(state: &AppState) -> Element {
             Element::button(t!("action.cancel"))
                 .small()
                 .neutral()
-                .outline()
+                .outline_soft()
                 .on_click(move |_| show.set(false)),
         )
         .child(Element::button(t!("action.confirm")).small().on_click({
