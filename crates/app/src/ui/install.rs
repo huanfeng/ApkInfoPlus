@@ -645,7 +645,12 @@ fn splits_section(state: &AppState) -> Element {
                 .small()
                 .neutral()
                 .outline()
-                .on_click(move |_| splits.with(|v| v.iter().for_each(|s| s.selected.set(true)))),
+                // 先把行拷出来再写：`with` 期间信号仓持共享借用，闭包里再 set 会撞 RefCell 借用而 panic
+                .on_click(move |_| {
+                    for s in splits.get() {
+                        s.selected.set(true);
+                    }
+                }),
         )
         .child(
             Element::button(t!("install.base_only"))
@@ -653,10 +658,9 @@ fn splits_section(state: &AppState) -> Element {
                 .neutral()
                 .outline()
                 .on_click(move |_| {
-                    splits.with(|v| {
-                        v.iter()
-                            .for_each(|s| s.selected.set(s.kind == SplitType::Base))
-                    })
+                    for s in splits.get() {
+                        s.selected.set(s.kind == SplitType::Base);
+                    }
                 }),
         );
 
