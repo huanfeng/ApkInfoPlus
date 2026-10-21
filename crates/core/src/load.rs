@@ -237,14 +237,23 @@ fn icon_resources(all: BTreeMap<u32, ResourceInfo>) -> BTreeMap<u32, ResourceInf
         .filter(|(_, r)| {
             matches!(
                 r.type_name.as_str(),
-                "drawable" | "mipmap" | "color" | "attr" | "xml" | "raw" | "anim" | "animator" | "interpolator"
+                "drawable"
+                    | "mipmap"
+                    | "color"
+                    | "attr"
+                    | "xml"
+                    | "raw"
+                    | "anim"
+                    | "animator"
+                    | "interpolator"
             ) || r.file_paths.iter().any(|p| p.starts_with("res/"))
                 || !r.references.is_empty()
         })
         .map(|(id, mut r)| {
             // 非 res/ 开头的字符串值对图标没用（翻译文本等），顺手扔掉。
             if !matches!(r.type_name.as_str(), "drawable" | "mipmap") {
-                r.file_paths.retain(|p| p.starts_with("res/") || p.starts_with('#'));
+                r.file_paths
+                    .retain(|p| p.starts_with("res/") || p.starts_with('#'));
             }
             (id, r)
         })

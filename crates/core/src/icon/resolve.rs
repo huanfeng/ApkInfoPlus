@@ -26,25 +26,39 @@ static NAMED_RESOURCE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// 常用框架颜色（`@android:color/*`）。资源表里不含框架资源，只能硬编码兜底。
+///
+/// ID 与取值按 AOSP `frameworks/base/core/res/res/values/public.xml` 与 `colors.xml`：
+/// Dart 版那张表约有一半 ID 错位（把 0x0106000d transparent 记成 white 等），照抄会把
+/// 透明背景画成白底，这里改为正确值。
 const FRAMEWORK_COLOR_FALLBACK: &[(u32, u32)] = &[
-    (0x0106000c, 0xff000000), // android:color/black
-    (0x0106000d, 0xffffffff), // android:color/white
-    (0x01060000, 0x00000000), // android:color/transparent
-    (0x0106000e, 0xff444444), // android:color/darker_gray
-    (0x01060010, 0xffaaaaaa), // android:color/lighter_gray
-    (0x01060012, 0xff0000ff), // android:color/holo_blue_bright
-    (0x01060013, 0xff0099cc), // android:color/holo_blue_dark
-    (0x01060014, 0xff33b5e5), // android:color/holo_blue_light
-    (0x01060015, 0xffff8800), // android:color/holo_orange_dark
-    (0x01060016, 0xffffbb33), // android:color/holo_orange_light
-    (0x01060017, 0xff669900), // android:color/holo_green_dark
-    (0x01060018, 0xff99cc00), // android:color/holo_green_light
-    (0x01060019, 0xffcc0000), // android:color/holo_red_dark
-    (0x0106001a, 0xffff4444), // android:color/holo_red_light
-    (0x0106001b, 0xff9933cc), // android:color/holo_purple
-    // 以上照抄 Dart 版。注意 Dart 表与 AOSP 公开 ID 并不一致（android.R.color.white 实为
-    // 0x0106000b，0x0106000d 实为 transparent）；为不改变既有行为只追加缺失的 white。
-    (0x0106000b, 0xffffffff), // android:color/white（AOSP 实际 ID）
+    (0x01060000, 0xffffffff), // primary_text_dark
+    (0x01060001, 0xffffffff), // primary_text_dark_nodisable
+    (0x01060002, 0xffbebebe), // secondary_text_dark
+    (0x01060003, 0xffbebebe), // secondary_text_dark_nodisable
+    (0x01060004, 0xff808080), // tertiary_text_dark
+    (0x01060005, 0xff000000), // primary_text_light
+    (0x01060006, 0xff000000), // primary_text_light_nodisable
+    (0x01060007, 0xff323232), // secondary_text_light
+    (0x01060008, 0xff323232), // secondary_text_light_nodisable
+    (0x01060009, 0xff808080), // tertiary_text_light
+    (0x0106000a, 0xffffffff), // tab_indicator_text
+    (0x0106000b, 0xffffffff), // white
+    (0x0106000c, 0xff000000), // black
+    (0x0106000d, 0x00000000), // transparent
+    (0x0106000e, 0xff000000), // background_dark
+    (0x0106000f, 0xffffffff), // background_light
+    (0x01060010, 0xffaaaaaa), // darker_gray
+    (0x01060011, 0xff000000), // widget_edittext_dark
+    (0x01060012, 0xff33b5e5), // holo_blue_light
+    (0x01060013, 0xff99cc00), // holo_green_light
+    (0x01060014, 0xffff4444), // holo_red_light
+    (0x01060015, 0xff0099cc), // holo_blue_dark
+    (0x01060016, 0xff669900), // holo_green_dark
+    (0x01060017, 0xffcc0000), // holo_red_dark
+    (0x01060018, 0xffaa66cc), // holo_purple
+    (0x01060019, 0xffffbb33), // holo_orange_light
+    (0x0106001a, 0xffff8800), // holo_orange_dark
+    (0x0106001b, 0xff00ddff), // holo_blue_bright
 ];
 
 /// 规范化 zip 内路径：去引号、`file://`、反斜杠与前导 `/`。
@@ -748,8 +762,12 @@ pub(crate) mod tests {
         );
         // 框架颜色兜底
         assert_eq!(
-            r.resolve_color_ref(Some("@res/0x0106000d"), 0),
+            r.resolve_color_ref(Some("@res/0x0106000b"), 0),
             Some(0xffffffff)
+        );
+        assert_eq!(
+            r.resolve_color_ref(Some("@res/0x0106000d"), 0),
+            Some(0x00000000)
         );
         assert_eq!(r.resolve_color_ref(Some("@res/0x7f999999"), 0), None);
     }
