@@ -208,11 +208,17 @@ fn install_single(
     let _tmp;
     let apk_path = if needs_rename {
         let dir = TempDir::new().map_err(|e| Stop::Failed(e.to_string()))?;
+        // `foo.apk.1` 的 stem 是 `foo.apk`，再补后缀会变成 `foo.apk.apk`
         let stem = req
             .file
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "app".into());
+        let stem = stem
+            .strip_suffix(".apk")
+            .or_else(|| stem.strip_suffix(".APK"))
+            .unwrap_or(&stem)
+            .to_string();
         let dest = dir.0.join(format!("{}.apk", stem));
         if std::fs::hard_link(&req.file, &dest).is_err() {
             std::fs::copy(&req.file, &dest).map_err(|e| Stop::Failed(e.to_string()))?;

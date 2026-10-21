@@ -12,13 +12,13 @@
 **Goal**: zip 读取、二进制 XML、resources.arsc、Manifest → ApkMeta、ApkReader、`apkinfo` CLI。
 **Success Criteria**: 对本机数个真实 APK，包名 / 版本 / SDK / 权限 / 标签 / 图标路径与 `aapt2 dump badging` 一致；混淆容错逻辑与 Dart 版等价。
 **Tests**: 字符串池（UTF-8 / UTF-16、长串）、ResTable_config（BCP-47 packed）、颜色转换、Manifest 启发式、合成二进制 XML 的解析。
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: 图标
 **Goal**: 候选收集、VectorDrawable → SVG、adaptive-icon 合成、位图解码、PNG / SVG / 原始导出。
 **Success Criteria**: 测试 APK 的图标渲染正确（自适应 / 矢量 / 位图三类各至少一个），导出的 SVG 能被 resvg 回读。
 **Tests**: 颜色解析、SVG 转换片段、候选排序、dpi 提取。
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: 归档包、签名、哈希
 **Goal**: XAPK / APKM / APKS / ZIP 解析；v1 / v2 / v3 证书提取；流式 MD5 / SHA1。
@@ -53,4 +53,4 @@
 ## Stage 9: 收尾
 **Goal**: 其余语言（zh-TW / zh-HK / ja / ko）、README、打包说明、应用图标。
 **Success Criteria**: `cargo clippy --all-targets` 零警告，`cargo test` 全绿。
-**Status**: In Progress
+**Status**: Complete
