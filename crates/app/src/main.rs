@@ -156,16 +156,9 @@ fn main() {
                     true
                 }
                 Key::Escape => {
-                    // 有对话框时先关对话框；否则交给默认行为（关窗）。
-                    if st.show_install.get() && !st.install.installing.get() {
-                        st.show_install.set(false);
-                        return true;
-                    }
+                    // 有对话框时先关对话框；否则交给默认行为（关窗，安装中由 on_close_request 拦）。
                     if st.show_rename.get() {
                         st.show_rename.set(false);
-                        return true;
-                    }
-                    if st.install.installing.get() {
                         return true;
                     }
                     let _ = sctx;

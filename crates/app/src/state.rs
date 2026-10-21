@@ -103,7 +103,6 @@ pub struct AppState {
 
     // ---- 界面 ----
     pub tab: Signal<usize>,
-    pub show_install: Signal<bool>,
     pub show_rename: Signal<bool>,
     pub window_title: Signal<String>,
     pub title_width: Signal<i32>,
@@ -156,7 +155,6 @@ impl AppState {
             sig_state: signal(SigState::Idle),
             sig_error: signal(String::new()),
             tab: signal(0),
-            show_install: signal(false),
             show_rename: signal(false),
             window_title: signal(String::from("APK Info Plus")),
             title_width: signal(title_width),

@@ -5,7 +5,7 @@ use std::rc::Rc;
 use apkinfo_core::info::ApkInfo;
 use windui::prelude::*;
 
-use super::{header, install, pages, rename};
+use super::{header, pages, rename};
 use crate::actions;
 use crate::state::AppState;
 
@@ -28,7 +28,6 @@ pub fn build(state: &AppState) -> Element {
     Element::stack()
         .fill()
         .child(root)
-        .child(install::build_dialog(state))
         .child(rename::build_dialog(state))
 }
 

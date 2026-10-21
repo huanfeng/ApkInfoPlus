@@ -15,6 +15,8 @@ use crate::state::AppState;
 
 /// 内容区左右留白。
 pub const PAGE_PAD: i32 = 20;
+/// 滚动容器右侧额外留白：windui 的滚动条压在内容之上（约 10px），不让位就会盖住行尾。
+pub const SCROLL_GUTTER: i32 = 10;
 
 /// 「标题 | 值 | 复制」一行。值为空时显示占位。
 pub fn field_row(
@@ -111,7 +113,12 @@ pub fn page(body: Element) -> Element {
     Element::scroll().fill().child(
         Element::col()
             .width_match()
-            .padding_edges(Insets::new(PAGE_PAD, 14, PAGE_PAD + 8, PAGE_PAD))
+            .padding_edges(Insets::new(
+                PAGE_PAD,
+                14,
+                PAGE_PAD + SCROLL_GUTTER,
+                PAGE_PAD,
+            ))
             .spacing(14)
             .child(body),
     )

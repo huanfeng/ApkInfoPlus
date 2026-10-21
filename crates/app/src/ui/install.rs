@@ -1,6 +1,8 @@
-//! 安装对话框：设备列表（多选）+ 高级选项 + 分包勾选 + 进度与取消。
+//! 安装窗口：设备列表（多选）+ 高级选项 + 分包勾选 + 进度与取消。
 //!
-//! 安装在后台线程串行执行，进度经 `Msg::Install` 回到 UI 线程更新各设备行的状态信号。
+//! 独立子窗（`Window::single`）而非主窗内的模态：可以拖到主窗之外、与主窗并排看日志，
+//! 也不会把主窗整个压暗锁死。安装在后台线程串行执行，进度经 `Msg::Install` 回到 UI 线程
+//! 更新各设备行的状态信号；子窗没有自己的消息通道，读的是同一批 `Signal`。
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,6 +50,8 @@ pub struct InstallState {
     pub confirm_stop: Signal<bool>,
     pub cancel: Rc<std::cell::RefCell<Option<Arc<AtomicBool>>>>,
     pub log: Signal<String>,
+    /// 窗口顶部显示的「正在为哪个文件安装」。
+    pub file_name: Signal<String>,
     /// 分包行的信号归它所有：每次打开对话框整批回收再重建，否则每开一次就漏一批。
     /// `ManuallyDrop`：进程退出时信号 arena（线程局部）可能先于 AppState 销毁，
     /// 那时再 dispose 会撞 TLS 已析构而 abort；这两个作用域只在重建时手动回收。
@@ -73,6 +77,7 @@ impl InstallState {
             confirm_stop: signal(false),
             cancel: Rc::new(std::cell::RefCell::new(None)),
             log: signal(String::new()),
+            file_name: signal(String::new()),
             split_scope: Rc::new(std::cell::RefCell::new(std::mem::ManuallyDrop::new(
                 windui::signal::SignalScope::new(),
             ))),
@@ -83,17 +88,23 @@ impl InstallState {
     }
 }
 
-/// 打开对话框：填充分包行、刷新设备。
+/// 打开安装窗口：填充分包行、刷新设备。窗口已开着时只把它拉到前台（`single` 去重）。
 pub fn open(state: &AppState, ctx: &mut EventCtx) {
     let Some(info) = state.current_info() else {
         return;
     };
     let ins = &state.install;
-    // 安装进行中只把对话框重新露出来，不能重置设备状态与日志。
+    // 安装进行中只把窗口重新拉到前台，不能重置设备状态与日志。
     if ins.installing.get() {
-        state.show_install.set(true);
+        ctx.open_window(window(state));
         return;
     }
+    ins.file_name.set(
+        info.path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
     // 先把旧行清掉再回收旧信号：host_signal 下一帧按新数据重建，不会再读到已回收的句柄。
     ins.splits.set(Vec::new());
     let mut scope = ins.split_scope.borrow_mut();
@@ -116,8 +127,29 @@ pub fn open(state: &AppState, ctx: &mut EventCtx) {
         d.phase.set(None);
         d.message.set(String::new());
     }
-    state.show_install.set(true);
+    ctx.open_window(window(state));
     refresh_devices(state, ctx);
+}
+
+fn window(state: &AppState) -> WindowRequest {
+    let st = state.clone();
+    let installing = state.install.installing;
+    let confirm = state.install.confirm_stop;
+    Window::new(tr!("install.title"), 680, 640)
+        .single("install")
+        .centered(true)
+        .min_size(560, 480)
+        .title(t!("install.title"))
+        // 安装中关窗：不直接关，弹「确认停止」；停下来之后窗口留着看结果，用户再关。
+        .on_close_request(move |_ctx| {
+            if installing.get() {
+                confirm.set(true);
+                false
+            } else {
+                true
+            }
+        })
+        .content(move || build_window(&st))
 }
 
 pub fn refresh_devices(state: &AppState, ctx: &mut EventCtx) {
@@ -312,15 +344,40 @@ fn stop_install(state: &AppState) {
 // 界面
 // ---------------------------------------------------------------------------
 
-pub fn build_dialog(state: &AppState) -> Element {
+fn build_window(state: &AppState) -> Element {
     let st = state.clone();
     let ins = state.install.clone();
-    let show = state.show_install;
     let installing = ins.installing;
 
+    let header = Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(8)
+        .padding_edges(Insets::new(super::PAGE_PAD, 14, super::PAGE_PAD, 6))
+        .child(
+            Element::image_content(crate::icons::content("package", crate::icons::ICON_GRAY))
+                .size(18, 18),
+        )
+        .child(
+            Element::label(ins.file_name)
+                .font_size(14.0)
+                .font_weight(600)
+                .fg_role(Role::Text)
+                .max_lines(1)
+                .truncate(Truncate::Middle)
+                .weight(1.0),
+        );
+
+    // 右侧多留滚动条的位置：滚动条压在内容之上，不留白就会盖住行尾的徽章。
     let body = Element::col()
         .width_match()
         .spacing(12)
+        .padding_edges(Insets::new(
+            super::PAGE_PAD,
+            6,
+            super::PAGE_PAD + super::SCROLL_GUTTER,
+            super::PAGE_PAD,
+        ))
         .child(device_section(state))
         .child(options_section(state))
         .child(splits_section(state))
@@ -330,6 +387,8 @@ pub fn build_dialog(state: &AppState) -> Element {
         .width_match()
         .cross(Align::Center)
         .spacing(8)
+        .padding_edges(Insets::new(super::PAGE_PAD, 10, super::PAGE_PAD, 12))
+        .bg_role(Role::Surface)
         .child(
             Element::button(t!("action.refresh"))
                 .small()
@@ -351,7 +410,7 @@ pub fn build_dialog(state: &AppState) -> Element {
                 .neutral()
                 .outline()
                 .visible_when(move || !installing.get())
-                .on_click(move |_| show.set(false)),
+                .on_click(move |ctx| ctx.request_close()),
         )
         .child(
             Element::button(t!("install.stop"))
@@ -385,20 +444,15 @@ pub fn build_dialog(state: &AppState) -> Element {
                 }),
         );
 
-    let panel = Element::dialog_panel(
-        show,
-        tr!("install.title"),
-        620,
-        move |_ctx| {
-            if !installing.get() {
-                show.set(false);
-            }
-        },
-        Element::scroll().width_match().height(420).child(body),
-        footer,
-    );
+    let page = Element::col()
+        .fill()
+        .bg_role(Role::Bg)
+        .child(header)
+        .child(Element::scroll().width_match().weight(1.0).child(body))
+        .child(Element::divider())
+        .child(footer);
 
-    // 停止确认：叠在安装对话框之上的小对话框。
+    // 停止确认：叠在安装窗口之上的小对话框。
     let confirm = ins.confirm_stop;
     let confirm_dialog = Element::dialog(
         confirm,
@@ -443,7 +497,7 @@ pub fn build_dialog(state: &AppState) -> Element {
             ),
     );
 
-    Element::stack().fill().child(panel).child(confirm_dialog)
+    Element::stack().fill().child(page).child(confirm_dialog)
 }
 
 fn device_section(state: &AppState) -> Element {
