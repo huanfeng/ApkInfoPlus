@@ -112,14 +112,15 @@ fn load_apk(path: &Path, size: u64) -> Result<Loaded, LoadError> {
 }
 
 fn load_archive(path: &Path, size: u64, kind: ArchiveKind) -> Result<Loaded, LoadError> {
-    let contents = archive::read_archive(path).map_err(LoadError::Zip)?;
+    let mut contents = archive::read_archive(path).map_err(LoadError::Zip)?;
     let kind = archive::effective_kind(kind, &contents).map_err(LoadError::Other)?;
     if kind == ArchiveKind::Apk {
         // 改了扩展名的 APK（zip 根目录就是 AndroidManifest.xml）。
         let reader = ApkReader::open(path).map_err(|e| LoadError::Zip(e.to_string()))?;
         return finish(path, size, ArchiveKind::Apk, reader, None, None);
     }
-    let base_bytes = contents.base_bytes.clone().ok_or(LoadError::NoBaseApk)?;
+    // take 而不是 clone：base.apk 可以有上百 MB，解析期不该在内存里放两份。
+    let base_bytes = contents.base_bytes.take().ok_or(LoadError::NoBaseApk)?;
     let reader = ApkReader::from_bytes(base_bytes).map_err(|e| LoadError::Zip(e.to_string()))?;
     finish(path, size, kind, reader, Some(contents), None)
 }

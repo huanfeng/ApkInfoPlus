@@ -51,15 +51,36 @@ pub struct InstallRequest {
 /// 临时目录守卫：离开作用域即删除。
 struct TempDir(PathBuf);
 
+/// 临时目录名前缀；`cleanup_stale_temp_dirs` 按它识别上次崩溃 / 强退留下的残骸。
+const TEMP_PREFIX: &str = "apkinfoplus-install";
+
 impl TempDir {
-    fn new(prefix: &str) -> io::Result<Self> {
+    fn new() -> io::Result<Self> {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let p = std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos));
+        let p =
+            std::env::temp_dir().join(format!("{}-{}-{}", TEMP_PREFIX, std::process::id(), nanos));
         std::fs::create_dir_all(&p)?;
         Ok(Self(p))
+    }
+}
+
+/// 删除其它进程（通常是上次没正常退出的本程序）留下的安装临时目录。
+/// 解压出来的 OBB 可能有几 GB，不清会一直占着磁盘。
+pub fn cleanup_stale_temp_dirs() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    let me = format!("{}-{}-", TEMP_PREFIX, std::process::id());
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with(TEMP_PREFIX) && !name.starts_with(&me) && e.path().is_dir() {
+            if let Err(err) = std::fs::remove_dir_all(e.path()) {
+                log::debug!("清理残留临时目录失败 {}: {}", name, err);
+            }
+        }
     }
 }
 
@@ -74,9 +95,23 @@ pub fn run(req: InstallRequest, cancel: Arc<AtomicBool>, emit: impl Fn(InstallEv
     let mut failed = 0;
 
     let prepared = if req.kind.is_archive() {
-        match prepare_archive(&req, &emit) {
+        match prepare_archive(&req, &cancel, &emit) {
             Ok(p) => Some(p),
-            Err(e) => {
+            Err(Stop::Cancelled) => {
+                for d in &req.devices {
+                    emit(InstallEvent::Device {
+                        device: d.clone(),
+                        phase: InstallPhase::Stopped,
+                        message: String::new(),
+                    });
+                }
+                emit(InstallEvent::Finished {
+                    success: 0,
+                    failed: 0,
+                });
+                return;
+            }
+            Err(Stop::Failed(e)) => {
                 emit(InstallEvent::Log(e.clone()));
                 for d in &req.devices {
                     emit(InstallEvent::Device {
@@ -165,7 +200,30 @@ fn install_single(
     cancel: &Arc<AtomicBool>,
     emit: &impl Fn(InstallEvent),
 ) -> Result<(), Stop> {
-    let args = adb::install_args(device, &req.options, &req.file);
+    // adb install 只认 .apk 后缀：`.zip`、`.apk.1` 这类改了名的包先复制到临时目录改回去。
+    let needs_rename = !req
+        .file
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("apk"));
+    let _tmp;
+    let apk_path = if needs_rename {
+        let dir = TempDir::new().map_err(|e| Stop::Failed(e.to_string()))?;
+        let stem = req
+            .file
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "app".into());
+        let dest = dir.0.join(format!("{}.apk", stem));
+        if std::fs::hard_link(&req.file, &dest).is_err() {
+            std::fs::copy(&req.file, &dest).map_err(|e| Stop::Failed(e.to_string()))?;
+        }
+        _tmp = Some(dir);
+        dest
+    } else {
+        _tmp = None;
+        req.file.clone()
+    };
+    let args = adb::install_args(device, &req.options, &apk_path);
     emit(InstallEvent::Log(format!("adb {}", args.join(" "))));
     let out = adb::run(&req.adb, &args, cancel).map_err(Stop::Failed)?;
     log_output(&out, emit);
@@ -180,9 +238,14 @@ struct Prepared {
     obbs: Vec<(PathBuf, String)>,
 }
 
-fn prepare_archive(req: &InstallRequest, emit: &impl Fn(InstallEvent)) -> Result<Prepared, String> {
-    let file = File::open(&req.file).map_err(|e| e.to_string())?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+fn prepare_archive(
+    req: &InstallRequest,
+    cancel: &Arc<AtomicBool>,
+    emit: &impl Fn(InstallEvent),
+) -> Result<Prepared, Stop> {
+    let fail = |e: String| Stop::Failed(e);
+    let file = File::open(&req.file).map_err(|e| fail(e.to_string()))?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| fail(e.to_string()))?;
     let names: Vec<String> = zip
         .file_names()
         .filter_map(|n| n.ok().map(|c| c.into_owned()))
@@ -199,15 +262,17 @@ fn prepare_archive(req: &InstallRequest, emit: &impl Fn(InstallEvent)) -> Result
         });
 
     let mut apks: Vec<String> = match &req.selected_splits {
-        Some(sel) if !sel.is_empty() => sel.clone(),
-        _ => names
+        // 明确传了空选择就是「一个都不装」，不能悄悄退化成装全部
+        Some(sel) if sel.is_empty() => return Err(fail("no apk entries selected".into())),
+        Some(sel) => sel.clone(),
+        None => names
             .iter()
             .filter(|n| n.to_lowercase().ends_with(".apk"))
             .cloned()
             .collect(),
     };
     if apks.is_empty() {
-        return Err("no apk entries selected".into());
+        return Err(fail("no apk entries selected".into()));
     }
     // base 排最前，其余按路径排序：install-multiple 对顺序不敏感，但日志更好读。
     apks.sort_by(|a, b| {
@@ -216,12 +281,15 @@ fn prepare_archive(req: &InstallRequest, emit: &impl Fn(InstallEvent)) -> Result
         bb.cmp(&ab).then_with(|| a.cmp(b))
     });
 
-    let dir = TempDir::new("apkinfoplus-install").map_err(|e| e.to_string())?;
+    let dir = TempDir::new().map_err(|e| fail(e.to_string()))?;
     let mut local_apks = Vec::new();
     for name in &apks {
-        let dest =
-            safe_join(&dir.0, name).ok_or_else(|| format!("unsafe path in archive: {}", name))?;
-        extract_entry(&mut zip, name, &dest)?;
+        if cancel.load(Ordering::SeqCst) {
+            return Err(Stop::Cancelled);
+        }
+        let dest = safe_join(&dir.0, name)
+            .ok_or_else(|| fail(format!("unsafe path in archive: {}", name)))?;
+        extract_entry(&mut zip, name, &dest).map_err(fail)?;
         emit(InstallEvent::Log(format!("extracted {}", name)));
         local_apks.push(dest);
     }
@@ -237,16 +305,19 @@ fn prepare_archive(req: &InstallRequest, emit: &impl Fn(InstallEvent)) -> Result
     let expansion_paths = expansion_paths(manifest.as_ref());
     let mut obbs = Vec::new();
     for name in names.iter().filter(|n| n.to_lowercase().ends_with(".obb")) {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(Stop::Cancelled);
+        }
         let Some(remote) = obb_remote_path(name, package.as_deref(), &expansion_paths) else {
             emit(InstallEvent::Log(format!(
-                "skip obb (no target path): {}",
+                "skip obb (no safe target path): {}",
                 name
             )));
             continue;
         };
-        let dest =
-            safe_join(&dir.0, name).ok_or_else(|| format!("unsafe path in archive: {}", name))?;
-        extract_entry(&mut zip, name, &dest)?;
+        let dest = safe_join(&dir.0, name)
+            .ok_or_else(|| fail(format!("unsafe path in archive: {}", name)))?;
+        extract_entry(&mut zip, name, &dest).map_err(fail)?;
         obbs.push((dest, remote));
     }
 
@@ -280,6 +351,10 @@ fn expansion_paths(manifest: Option<&serde_json::Value>) -> BTreeMap<String, Str
 }
 
 /// OBB 在设备上的目标路径（优先级与原版一致）。
+///
+/// 路径来源（manifest.json 的 install_path、zip 条目名、包名）都是归档包作者给的，
+/// 而它最终会出现在 adb 命令行里，所以只接受 `/sdcard/Android/obb/<包名>/<文件>` 这一种形状，
+/// 其它一律返回 `None` 跳过——宁可少推一个 OBB，也不把任意字符串送上设备 shell。
 pub fn obb_remote_path(
     entry: &str,
     package: Option<&str>,
@@ -287,18 +362,38 @@ pub fn obb_remote_path(
 ) -> Option<String> {
     let normalized = entry.replace('\\', "/");
     let base = normalized.rsplit('/').next().unwrap_or(&normalized);
-    if let Some(p) = expansions.get(base) {
+    let candidate = if let Some(p) = expansions.get(base) {
         let p = p.trim_start_matches('/');
-        return Some(if p.starts_with("sdcard/") || p.starts_with("storage/") {
-            format!("/{}", p)
-        } else {
-            format!("/sdcard/{}", p)
-        });
+        let p = p
+            .strip_prefix("storage/emulated/0/")
+            .or_else(|| p.strip_prefix("sdcard/"))
+            .unwrap_or(p);
+        format!("/sdcard/{}", p)
+    } else if let Some(idx) = normalized.find("Android/obb/") {
+        format!("/sdcard/{}", &normalized[idx..])
+    } else {
+        format!("/sdcard/Android/obb/{}/{}", package?, base)
+    };
+    is_safe_obb_path(&candidate).then_some(candidate)
+}
+
+/// `/sdcard/Android/obb/<pkg>/<file>`：包名与文件名只允许字母数字 `._-`，不能有 `..`。
+pub fn is_safe_obb_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/sdcard/Android/obb/") else {
+        return false;
+    };
+    let parts: Vec<&str> = rest.split('/').collect();
+    if parts.len() != 2 {
+        return false;
     }
-    if let Some(idx) = normalized.find("Android/obb/") {
-        return Some(format!("/sdcard/{}", &normalized[idx..]));
-    }
-    package.map(|pkg| format!("/sdcard/Android/obb/{}/{}", pkg, base))
+    let ok = |s: &str| {
+        !s.is_empty()
+            && s != "."
+            && s != ".."
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    };
+    ok(parts[0]) && ok(parts[1]) && parts[1].to_ascii_lowercase().ends_with(".obb")
 }
 
 fn install_archive(
@@ -323,23 +418,8 @@ fn install_archive(
             phase: InstallPhase::PushingObb,
             message: String::new(),
         });
-        let dir = match remote.rfind('/') {
-            Some(i) if i > 0 => &remote[..i],
-            _ => "/sdcard",
-        };
-        let mk = adb::shell_mkdir_args(device, dir);
-        emit(InstallEvent::Log(format!("adb {}", mk.join(" "))));
-        let out = adb::run(&req.adb, &mk, cancel).map_err(Stop::Failed)?;
-        log_output(&out, emit);
-        if out.cancelled {
-            return Err(Stop::Cancelled);
-        }
-        if !out.success {
-            return Err(Stop::Failed(
-                out.failure_reason()
-                    .unwrap_or_else(|| "mkdir failed".into()),
-            ));
-        }
+        // 不再单独 `adb shell mkdir -p`：adb push 自己会建父目录，
+        // 也就不存在把路径拼进设备 shell 的机会。
         let push = adb::push_args(device, local, remote);
         emit(InstallEvent::Log(format!("adb {}", push.join(" "))));
         let out = adb::run(&req.adb, &push, cancel).map_err(Stop::Failed)?;
@@ -421,6 +501,19 @@ mod tests {
             "/sdcard/Android/obb/com.y/main.obb"
         );
         assert!(obb_remote_path("x.obb", None, &BTreeMap::new()).is_none());
+        // 注入 / 越界的路径一律拒绝
+        let mut evil = BTreeMap::new();
+        evil.insert(
+            "a.obb".to_string(),
+            "Android/obb/com.x/a.obb; rm -rf /sdcard".to_string(),
+        );
+        assert!(obb_remote_path("a.obb", None, &evil).is_none());
+        assert!(obb_remote_path("Android/obb/../../x.obb", None, &BTreeMap::new()).is_none());
+        assert!(obb_remote_path("Android/obb/com.x/sub/x.obb", None, &BTreeMap::new()).is_none());
+        assert!(obb_remote_path("b.obb", Some("com.x$(id)"), &BTreeMap::new()).is_none());
+        assert!(is_safe_obb_path(
+            "/sdcard/Android/obb/com.a.b/main.1.com.a.b.obb"
+        ));
     }
 
     #[test]

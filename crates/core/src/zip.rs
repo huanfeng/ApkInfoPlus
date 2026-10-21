@@ -15,7 +15,13 @@ pub enum ZipError {
     NotFound(String),
     #[error("unsafe path rejected: {0}")]
     UnsafePath(String),
+    #[error("entry too large (> {limit} bytes): {name}")]
+    TooLarge { name: String, limit: u64 },
 }
+
+/// 读进内存的单个条目上限。APK 内最大的条目是 resources.arsc / classes.dex，
+/// 几十 MB 量级；归档包里的 base.apk 另走 `read_limited`。
+pub const MAX_READ_BYTES: u64 = 512 * 1024 * 1024;
 
 /// 可装箱的读取源；`Send` 让上层可以把读取器放进 `Mutex` 跨线程共享。
 pub trait ReadSeek: Read + Seek + Send {}
@@ -90,14 +96,32 @@ impl<R: Read + Seek> Archive<R> {
         self.inner.by_name(&real).ok().map(|f| f.size())
     }
 
-    /// 读取条目全部内容到内存。
+    /// 读取条目全部内容到内存（上限 [`MAX_READ_BYTES`]，防 zip bomb）。
     pub fn read(&mut self, name: &str) -> Result<Vec<u8>, ZipError> {
+        self.read_limited(name, MAX_READ_BYTES)
+    }
+
+    /// 同 [`read`](Self::read)，但由调用方给上限。解压后超过上限返回 `TooLarge`，
+    /// 而不是按条目头声明的大小盲信——声明值也可以造假。
+    pub fn read_limited(&mut self, name: &str, limit: u64) -> Result<Vec<u8>, ZipError> {
         let real = self
             .resolve_name(name)
             .ok_or_else(|| ZipError::NotFound(name.to_string()))?;
         let mut file = self.inner.by_name(&real)?;
+        if file.size() > limit {
+            return Err(ZipError::TooLarge {
+                name: name.to_string(),
+                limit,
+            });
+        }
         let mut buf = Vec::with_capacity(file.size().min(MAX_PREALLOC) as usize);
-        file.read_to_end(&mut buf)?;
+        file.by_ref().take(limit + 1).read_to_end(&mut buf)?;
+        if buf.len() as u64 > limit {
+            return Err(ZipError::TooLarge {
+                name: name.to_string(),
+                limit,
+            });
+        }
         Ok(buf)
     }
 

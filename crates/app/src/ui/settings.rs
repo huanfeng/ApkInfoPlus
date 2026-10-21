@@ -107,6 +107,8 @@ struct Watcher {
     adb_source: (Signal<usize>, u64),
     adb_path: (Signal<String>, u64),
     download_source: (Signal<usize>, u64),
+    /// 上次看到的 `download.changed` 版本号。
+    dl_changed: u64,
     locales: Vec<String>,
     resolved: Signal<String>,
 }
@@ -157,7 +159,8 @@ impl Watcher {
             // 只在点下载时读取，这里无需动作；保留比对以免反复触发。
         }
         let dl_changed = state.download.changed.version();
-        if adb_changed || dl_changed != self.resolved.version() {
+        if adb_changed || dl_changed != self.dl_changed {
+            self.dl_changed = dl_changed;
             self.resolved.set(resolved_adb_text(state));
         }
     }
@@ -700,6 +703,7 @@ fn build(state: &AppState) -> Element {
             adb_source: (adb_source, adb_source.version()),
             adb_path: (adb_path, adb_path.version()),
             download_source: (download_source, download_source.version()),
+            dl_changed: state.download.changed.version(),
             locales: locale_ids,
             resolved,
         })

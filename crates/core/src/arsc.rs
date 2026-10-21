@@ -370,12 +370,21 @@ impl ResourceTable {
         let global_strings = StringPool::parse(&mut r)?;
 
         let mut packages = Vec::new();
-        for _ in 0..package_count {
+        // package_count 来自文件头，最大 42 亿；每个包至少占一个 header，按剩余字节封顶。
+        let max_packages = (r.remain() / PACKAGE_HEADER_MIN).max(1);
+        for _ in 0..(package_count as usize).min(max_packages) {
             if r.remain() == 0 {
                 break;
             }
+            let before = r.pos();
             match parse_package(&mut r) {
-                Ok(p) => packages.push(p),
+                Ok(p) => {
+                    packages.push(p);
+                    // total_size 为 0 的坏包会让游标停在原地，再读就是同一个包的死循环
+                    if r.pos() <= before {
+                        break;
+                    }
+                }
                 Err(e) => {
                     log::debug!("arsc: package parse failed: {e}");
                     break;
@@ -598,12 +607,22 @@ fn skip_null_chunks(r: &mut ByteReader, boundary: usize) {
     }
 }
 
+/// ResTable_package 头至少这么大（type/headerSize/size/id + 256 字节包名 + 4 个偏移）。
+const PACKAGE_HEADER_MIN: usize = 12 + 256 + 16;
+
 fn parse_package(r: &mut ByteReader) -> Result<Package, Eof> {
     let start = r.pos();
     let _ty = r.u16()?;
     let header_size = r.u16()? as usize;
     let total_size = r.u32()? as usize;
-    let end = start.saturating_add(total_size);
+    if total_size < header_size.max(PACKAGE_HEADER_MIN) {
+        return Err(Eof {
+            pos: start,
+            want: PACKAGE_HEADER_MIN,
+            len: r.len(),
+        });
+    }
+    let end = start.saturating_add(total_size).min(r.len());
     let id = r.u32()?;
 
     // 包名：128 个 UTF-16 码元，NUL 截断
@@ -646,7 +665,9 @@ fn parse_package(r: &mut ByteReader) -> Result<Package, Eof> {
         // 单个 chunk 损坏只丢弃它本身，继续解析后续 chunk
         let res = match chunk_type {
             RES_TABLE_TYPE_SPEC_TYPE => parse_type_spec(r, &mut package),
-            RES_TABLE_TYPE_TYPE => parse_type(r, chunk_start, chunk_header, &mut package),
+            RES_TABLE_TYPE_TYPE => {
+                parse_type(r, chunk_start, chunk_header, chunk_size, &mut package)
+            }
             _ => Ok(()),
         };
         if let Err(e) = res {
@@ -685,6 +706,7 @@ fn parse_type(
     r: &mut ByteReader,
     chunk_start: usize,
     header_size: usize,
+    chunk_size: usize,
     package: &mut Package,
 ) -> Result<(), Eof> {
     let type_id = r.u8()?;
@@ -734,10 +756,23 @@ fn parse_type(
     }
 
     let data_start = chunk_start + entries_start;
+    let chunk_end = chunk_start.saturating_add(chunk_size).min(r.len());
+    // 同一个条目偏移可以被几十万个下标共享（混淆器惯用），逐个解析会把一份 bag 复制几十万次。
+    // 按偏移缓存，并给整个 chunk 的 map 条目总数设预算（每条 12 字节，不可能多于 chunk 字节数）。
+    let mut budget = chunk_end.saturating_sub(data_start) / 12;
+    let mut by_offset: std::collections::HashMap<usize, ResourceEntry> =
+        std::collections::HashMap::new();
     let mut entries = BTreeMap::new();
     for (idx, off) in offsets {
-        r.seek(data_start.saturating_add(off));
-        entries.insert(idx, read_entry(r)?);
+        let pos = data_start.saturating_add(off);
+        if let Some(e) = by_offset.get(&pos) {
+            entries.insert(idx, e.clone());
+            continue;
+        }
+        r.seek(pos);
+        let e = read_entry(r, chunk_end, &mut budget)?;
+        by_offset.insert(pos, e.clone());
+        entries.insert(idx, e);
     }
 
     package
@@ -747,7 +782,7 @@ fn parse_type(
     Ok(())
 }
 
-fn read_entry(r: &mut ByteReader) -> Result<ResourceEntry, Eof> {
+fn read_entry(r: &mut ByteReader, limit: usize, budget: &mut usize) -> Result<ResourceEntry, Eof> {
     let first = r.u16()?; // 普通条目是 size；紧凑条目是 key
     let flags = r.u16()?;
     if flags & ENTRY_FLAG_COMPACT != 0 {
@@ -767,8 +802,12 @@ fn read_entry(r: &mut ByteReader) -> Result<ResourceEntry, Eof> {
     let key_index = r.u32()?;
     if flags & ENTRY_FLAG_COMPLEX != 0 {
         let _parent = r.u32()?;
-        let count = r.u32()?;
-        let mut map_values = Vec::new();
+        let count = r.u32()? as usize;
+        // count 来自文件：按「到 chunk 末尾还能装几条」与剩余预算双重封顶
+        let max_here = limit.saturating_sub(r.pos()) / 12;
+        let count = count.min(max_here).min(*budget);
+        *budget -= count;
+        let mut map_values = Vec::with_capacity(count);
         for _ in 0..count {
             let name = r.u32()?;
             map_values.push((name, ResourceValue::read(r)?));

@@ -77,6 +77,11 @@ pub fn open(state: &AppState, ctx: &mut EventCtx) {
         return;
     };
     let ins = &state.install;
+    // 安装进行中只把对话框重新露出来，不能重置设备状态与日志。
+    if ins.installing.get() {
+        state.show_install.set(true);
+        return;
+    }
     let rows: Vec<SplitRow> = info
         .splits
         .iter()
@@ -332,11 +337,14 @@ pub fn build_dialog(state: &AppState) -> Element {
                 .small()
                 .enabled_when({
                     let devices = ins.devices;
+                    let splits = ins.splits;
                     move || {
                         !installing.get()
                             && devices.with(|v| {
                                 v.iter().any(|r| r.selected.get() && !r.device.is_offline())
                             })
+                            // 归档包：一个分包都没勾就没东西可装
+                            && splits.with(|v| v.is_empty() || v.iter().any(|s| s.selected.get()))
                     }
                 })
                 .on_click({

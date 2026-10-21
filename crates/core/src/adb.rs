@@ -254,17 +254,6 @@ pub fn install_multiple_args(
     v
 }
 
-pub fn shell_mkdir_args(device: &str, dir: &str) -> Vec<String> {
-    vec![
-        "-s".into(),
-        device.into(),
-        "shell".into(),
-        "mkdir".into(),
-        "-p".into(),
-        dir.to_string(),
-    ]
-}
-
 pub fn push_args(device: &str, local: &Path, remote: &str) -> Vec<String> {
     vec![
         "-s".into(),

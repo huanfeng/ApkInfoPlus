@@ -201,29 +201,36 @@ pub fn read_archive(path: &Path) -> Result<ArchiveContents, String> {
         });
     }
 
-    let mut read = |name: &str| -> Option<Vec<u8>> {
+    // 每类条目各有上限：manifest 与图标只会是几 MB，base.apk 放到 2 GiB（再大也装不进内存，
+    // 那就按「找不到 base」处理，而不是被 zip bomb 吃光内存）。
+    let mut read = |name: &str, limit: u64| -> Option<Vec<u8>> {
         let mut f = zip.by_name(name).ok()?;
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).ok()?;
-        Some(buf)
+        if f.size() > limit {
+            return None;
+        }
+        let mut buf = Vec::with_capacity(f.size().min(64 * 1024 * 1024) as usize);
+        f.by_ref().take(limit + 1).read_to_end(&mut buf).ok()?;
+        (buf.len() as u64 <= limit).then_some(buf)
     };
+    const SMALL: u64 = 16 * 1024 * 1024;
+    const BASE: u64 = 2 * 1024 * 1024 * 1024;
     let manifest = ["manifest.json", "info.json"]
         .iter()
-        .find_map(|n| read(n))
+        .find_map(|n| read(n, SMALL))
         .and_then(|b| parse_manifest_json(&String::from_utf8_lossy(&b)));
 
     let apk_names: Vec<String> = apks.iter().map(|(n, _)| n.clone()).collect();
     let base_entry = find_base_apk(&apk_names);
-    let base_bytes = base_entry.as_deref().and_then(&mut read);
+    let base_bytes = base_entry.as_deref().and_then(|n| read(n, BASE));
 
     let mut icon_bytes = None;
     if let Some(m) = &manifest {
         if let Some(icon) = &m.icon {
-            icon_bytes = read(icon.trim_start_matches('/'));
+            icon_bytes = read(icon.trim_start_matches('/'), SMALL);
         }
     }
     if icon_bytes.is_none() {
-        icon_bytes = read("icon.png");
+        icon_bytes = read("icon.png", SMALL);
     }
 
     Ok(ArchiveContents {

@@ -20,6 +20,37 @@ const EXPORT_ICON_SIZE: u32 = 1024;
 const PREVIEW_ICON_SIZE: u32 = 256;
 
 // ---------------------------------------------------------------------------
+// 后台线程：panic 兜底
+// ---------------------------------------------------------------------------
+
+/// 在后台线程里跑 `f`，panic 转成 `Err`。否则线程一 panic 就没有消息发回 UI，
+/// 「正在解析…」会永远挂着。
+fn guarded<T>(what: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(r) => r,
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "unknown panic".into());
+            log::error!("{} 线程 panic: {}", what, msg);
+            Err(format!("internal error: {}", msg))
+        }
+    }
+}
+
+/// 安装进行中时阻止会动文件的操作，并提示。
+fn blocked_by_install(state: &AppState, ctx: &mut EventCtx) -> bool {
+    if state.install.installing.get() {
+        ctx.toast(tr!("install.installing"));
+        true
+    } else {
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 文件支持判定
 // ---------------------------------------------------------------------------
 
@@ -54,6 +85,9 @@ pub fn is_supported_file(path: &Path) -> bool {
 // ---------------------------------------------------------------------------
 
 pub fn pick_file(state: &AppState, ctx: &mut EventCtx) {
+    if blocked_by_install(state, ctx) {
+        return;
+    }
     let st = state.clone();
     let mut dlg = windui::prelude::PickDialog::new()
         .title(tr!("open.select_apk_file"))
@@ -75,6 +109,9 @@ pub fn pick_file(state: &AppState, ctx: &mut EventCtx) {
 }
 
 pub fn open_dropped(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
+    if blocked_by_install(state, ctx) {
+        return;
+    }
     if !is_supported_file(&path) {
         ctx.toast_err(tr!("drop.invalid_file_type"));
         return;
@@ -84,6 +121,9 @@ pub fn open_dropped(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
 
 /// 打开文件：重置状态，启动解析 / 哈希 / 签名三条后台线程。
 pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
+    if blocked_by_install(state, ctx) {
+        return;
+    }
     if !path.is_file() {
         ctx.toast_err(tr!(
             "open.file_not_found",
@@ -114,9 +154,11 @@ pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
         let tx = state.tx.clone();
         let p = path.clone();
         thread::spawn(move || {
-            let result = apkinfo_core::load::load(&p)
-                .map(Box::new)
-                .map_err(|e| e.to_string());
+            let result = guarded("解析", || {
+                apkinfo_core::load::load(&p)
+                    .map(Box::new)
+                    .map_err(|e| e.to_string())
+            });
             let _ = tx.send(Msg::Parsed { gen, result });
         });
     }
@@ -127,7 +169,9 @@ pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
         let tx = state.tx.clone();
         let p = path.clone();
         thread::spawn(move || {
-            let result = apkinfo_core::hash::file_hashes(&p).map_err(|e| e.to_string());
+            let result = guarded("哈希", || {
+                apkinfo_core::hash::file_hashes(&p).map_err(|e| e.to_string())
+            });
             let _ = tx.send(Msg::Hashes { gen, result });
         });
     } else {
@@ -144,7 +188,9 @@ pub fn open_file(state: &AppState, ctx: &mut EventCtx, path: PathBuf) {
         let tx = state.tx.clone();
         let p = path.clone();
         thread::spawn(move || {
-            let result = apkinfo_core::signature::parse_file(&p).map_err(|e| e.to_string());
+            let result = guarded("签名", || {
+                apkinfo_core::signature::parse_file(&p).map_err(|e| e.to_string())
+            });
             let _ = tx.send(Msg::Signature { gen, result });
         });
     }
@@ -156,7 +202,10 @@ pub fn reparse(state: &AppState, ctx: &mut EventCtx) {
     }
 }
 
-pub fn close_file(state: &AppState, _ctx: &mut EventCtx) {
+pub fn close_file(state: &AppState, ctx: &mut EventCtx) {
+    if blocked_by_install(state, ctx) {
+        return;
+    }
     state.next_generation();
     state.clear_file_state();
     state.file_path.set(None);
@@ -237,13 +286,23 @@ pub fn select_icon(state: &AppState, index: usize) {
     state.icon_index.set(index);
     state.icon_loading.set(true);
     let gen = state.generation.get();
+    let token = state.icon_req.get() + 1;
+    state.icon_req.set(token);
     let tx = state.tx.clone();
     thread::spawn(move || {
-        let result = match session.lock() {
+        let result = guarded("图标渲染", || match session.lock() {
             Ok(mut s) => s.render(&candidate, PREVIEW_ICON_SIZE, false),
-            Err(_) => Err("icon session poisoned".to_string()),
-        };
-        let _ = tx.send(Msg::Icon { gen, index, result });
+            // 上一次渲染 panic 过：取回锁继续用，比让所有图标永远报错好
+            Err(poisoned) => poisoned
+                .into_inner()
+                .render(&candidate, PREVIEW_ICON_SIZE, false),
+        });
+        let _ = tx.send(Msg::Icon {
+            gen,
+            token,
+            index,
+            result,
+        });
     });
 }
 
@@ -352,7 +411,10 @@ pub fn export_png(state: &AppState, ctx: &mut EventCtx) {
         thread::spawn(move || {
             let image = match session.lock() {
                 Ok(mut s) => s.render(&candidate, EXPORT_ICON_SIZE, true).ok(),
-                Err(_) => None,
+                Err(p) => p
+                    .into_inner()
+                    .render(&candidate, EXPORT_ICON_SIZE, true)
+                    .ok(),
             }
             .or(fallback);
             let result = match image {
@@ -384,7 +446,7 @@ pub fn export_svg(state: &AppState, ctx: &mut EventCtx) {
         thread::spawn(move || {
             let svg = match session.lock() {
                 Ok(mut s) => s.export_svg(&candidate),
-                Err(_) => Err("icon session poisoned".to_string()),
+                Err(p) => p.into_inner().export_svg(&candidate),
             };
             let result = svg.and_then(|text| {
                 std::fs::write(&dest, text)
@@ -415,7 +477,7 @@ pub fn export_original(state: &AppState, ctx: &mut EventCtx) {
         thread::spawn(move || {
             let bytes = match session.lock() {
                 Ok(mut s) => s.raw_bytes(&candidate),
-                Err(_) => None,
+                Err(p) => p.into_inner().raw_bytes(&candidate),
             }
             .or_else(|| fallback.map(|f| encode_png(&f)));
             let result = match bytes {
@@ -475,8 +537,8 @@ pub fn open_install(state: &AppState, ctx: &mut EventCtx) {
     crate::ui::install::open(state, ctx);
 }
 
-pub fn open_rename(state: &AppState, _ctx: &mut EventCtx) {
-    if state.current_info().is_none() {
+pub fn open_rename(state: &AppState, ctx: &mut EventCtx) {
+    if state.current_info().is_none() || blocked_by_install(state, ctx) {
         return;
     }
     crate::ui::rename::open(state);
@@ -591,8 +653,13 @@ pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
                 }
             }
         }
-        Msg::Icon { gen, index, result } => {
-            if !state.is_current(gen) {
+        Msg::Icon {
+            gen,
+            token,
+            index,
+            result,
+        } => {
+            if !state.is_current(gen) || token != state.icon_req.get() {
                 return;
             }
             match result {

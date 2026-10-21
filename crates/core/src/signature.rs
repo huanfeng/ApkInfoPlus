@@ -175,7 +175,10 @@ fn read_signing_block<R: Read + Seek>(f: &mut R) -> Result<Option<Vec<u8>>, Stri
         return Ok(None);
     }
     let size_of_block = u64::from_le_bytes(footer[..8].try_into().unwrap());
-    if size_of_block < 24 || size_of_block + 8 > cd_offset || size_of_block > 64 * 1024 * 1024 {
+    // 全部用 checked / 减法形式比较：size 来自文件，u64 加法在恶意输入下会回绕。
+    let plausible = (24..=64 * 1024 * 1024).contains(&size_of_block)
+        && size_of_block.checked_add(8).is_some_and(|t| t <= cd_offset);
+    if !plausible {
         return Err(format!("implausible signing block size {}", size_of_block));
     }
     let start = cd_offset - size_of_block - 8;
@@ -200,7 +203,8 @@ fn parse_block_pairs(block: &[u8]) -> Vec<(u32, &[u8])> {
     while pos + 12 <= end {
         let len = u64::from_le_bytes(block[pos..pos + 8].try_into().unwrap()) as usize;
         pos += 8;
-        if len < 4 || pos + len > end {
+        // `len > end - pos` 而不是 `pos + len > end`：后者在 len 极大时回绕后能通过检查
+        if len < 4 || len > end - pos {
             break;
         }
         let id = u32::from_le_bytes(block[pos..pos + 4].try_into().unwrap());
@@ -217,7 +221,7 @@ fn take_prefixed<'a>(data: &'a [u8], pos: &mut usize) -> Result<&'a [u8], String
     }
     let len = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap()) as usize;
     *pos += 4;
-    if *pos + len > data.len() {
+    if len > data.len() - *pos {
         return Err("truncated length-prefixed field".into());
     }
     let s = &data[*pos..*pos + len];

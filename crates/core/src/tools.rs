@@ -83,8 +83,20 @@ fn host_os() -> &'static str {
     }
 }
 
+/// 索引里一条归档的描述：URL（可能是相对路径）+ 可选的 SHA-1 校验值。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveRef {
+    pub url: String,
+    pub sha1: Option<String>,
+}
+
 /// 从 repository2-3.xml 文本里找出 platform-tools 的归档 URL（可能是相对路径）。
 pub fn find_platform_tools_url(xml: &str) -> Option<String> {
+    find_platform_tools_archive(xml).map(|a| a.url)
+}
+
+/// 同上，连同校验值一起返回。官方索引的 `<complete>` 里带 `<checksum type="sha1">`。
+pub fn find_platform_tools_archive(xml: &str) -> Option<ArchiveRef> {
     let pkg_re = regex::Regex::new(
         r#"(?s)<remotePackage[^>]*path="platform-tools"[^>]*>(.*?)</remotePackage>"#,
     )
@@ -93,6 +105,7 @@ pub fn find_platform_tools_url(xml: &str) -> Option<String> {
     let archive_re = regex::Regex::new(r"(?s)<archive>(.*?)</archive>").ok()?;
     let os_re = regex::Regex::new(r"<host-os>\s*([a-z]+)\s*</host-os>").ok()?;
     let url_re = regex::Regex::new(r"<url>\s*([^<\s]+)\s*</url>").ok()?;
+    let sum_re = regex::Regex::new(r"<checksum[^>]*>\s*([0-9a-fA-F]{40})\s*</checksum>").ok()?;
     let mut fallback = None;
     for cap in archive_re.captures_iter(body) {
         let a = cap.get(1)?.as_str();
@@ -102,8 +115,13 @@ pub fn find_platform_tools_url(xml: &str) -> Option<String> {
             .and_then(|c| c.get(1))
             .map(|m| m.as_str().to_string());
         let Some(url) = url else { continue };
+        let sha1 = sum_re
+            .captures(a)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_ascii_lowercase());
+        let archive = ArchiveRef { url, sha1 };
         if os == Some(host_os()) {
-            return Some(url);
+            return Some(archive);
         }
         // 没有 host-os 标签时按文件名猜。
         let hint = match host_os() {
@@ -111,11 +129,28 @@ pub fn find_platform_tools_url(xml: &str) -> Option<String> {
             "macosx" => "-darwin",
             _ => "-linux",
         };
-        if os.is_none() && url.contains(hint) {
-            fallback = Some(url);
+        if os.is_none() && archive.url.contains(hint) {
+            fallback = Some(archive);
         }
     }
     fallback
+}
+
+/// 下载产物按索引给的 SHA-1 校验；索引没给时放行（只有自建的本地索引会没有）。
+pub fn verify_sha1(bytes: &[u8], expected: Option<&str>) -> Result<(), String> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    use sha1::Digest as _;
+    let actual = hex::encode(sha1::Sha1::digest(bytes));
+    if actual.eq_ignore_ascii_case(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "sha1 mismatch: expected {} got {}",
+            expected, actual
+        ))
+    }
 }
 
 fn fetch_bytes(
@@ -129,7 +164,13 @@ fn fetch_bytes(
     if !url.contains("://") && Path::new(url).is_file() {
         return std::fs::read(url).map_err(|e| e.to_string());
     }
-    let resp = ureq::get(url).call().map_err(|e| e.to_string())?;
+    // 连接 20s、整体 15 分钟：没有超时的话网络卡住时取消键也救不回来（read 一直阻塞）。
+    let agent: ureq::Agent = ureq::config::Config::builder()
+        .timeout_connect(Some(std::time::Duration::from_secs(20)))
+        .timeout_global(Some(std::time::Duration::from_secs(15 * 60)))
+        .build()
+        .new_agent();
+    let resp = agent.get(url).call().map_err(|e| e.to_string())?;
     let total = resp
         .headers()
         .get("content-length")
@@ -183,14 +224,14 @@ pub fn download_platform_tools(
                     continue;
                 }
             };
-            let Some(archive_url) = find_platform_tools_url(&xml) else {
+            let Some(archive) = find_platform_tools_archive(&xml) else {
                 last_err = format!("{}: platform-tools not found in index", index_url);
                 continue;
             };
-            let full_url = if archive_url.contains("://") {
-                archive_url
+            let full_url = if archive.url.contains("://") {
+                archive.url.clone()
             } else {
-                resolve_relative(index_url, &archive_url)
+                resolve_relative(index_url, &archive.url)
             };
             emit(DownloadEvent::Progress {
                 stage: "platform-tools".into(),
@@ -211,6 +252,10 @@ pub fn download_platform_tools(
                     continue;
                 }
             };
+            if let Err(e) = verify_sha1(&bytes, archive.sha1.as_deref()) {
+                // 校验失败是硬错误：下载下来的是会被执行的 adb，不能换个源再试就算了。
+                return Err(format!("{}: {}", full_url, e));
+            }
             emit(DownloadEvent::Progress {
                 stage: "extract".into(),
                 percent: None,
@@ -238,7 +283,9 @@ fn resolve_relative(base: &str, rel: &str) -> String {
 fn extract_platform_tools(bytes: &[u8], dir: &Path) -> Result<(), String> {
     let cursor = io::Cursor::new(bytes);
     let mut zip = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-    let target = dir.join("platform-tools");
+    // 先解到旁边的临时目录，全部成功后再替换：中途失败不会留下半套 platform-tools。
+    let final_target = dir.join("platform-tools");
+    let target = dir.join(format!("platform-tools.tmp-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&target);
     std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
     for i in 0..zip.len() {
@@ -279,6 +326,10 @@ fn extract_platform_tools(bytes: &[u8], dir: &Path) -> Result<(), String> {
             let _ = std::fs::set_permissions(&adb, std::fs::Permissions::from_mode(0o755));
         }
     }
+    if final_target.exists() {
+        std::fs::remove_dir_all(&final_target).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(&target, &final_target).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -303,7 +354,12 @@ mod tests {
 <archive><complete><url>platform-tools_r35.0.2-linux.zip</url></complete><host-os>linux</host-os></archive>
 <archive><complete><url>platform-tools_r35.0.2-win.zip</url></complete><host-os>windows</host-os></archive>
 </archives></remotePackage></sdk:sdk-repository>"#;
-        let url = find_platform_tools_url(xml).unwrap();
+        let archive = find_platform_tools_archive(xml).unwrap();
+        let url = archive.url.clone();
+        assert!(archive.sha1.is_none());
+        assert!(verify_sha1(b"abc", None).is_ok());
+        assert!(verify_sha1(b"abc", Some("a9993e364706816aba3e25717850c26c9cd0d89d")).is_ok());
+        assert!(verify_sha1(b"abd", Some("a9993e364706816aba3e25717850c26c9cd0d89d")).is_err());
         let expect = match host_os() {
             "windows" => "platform-tools_r35.0.2-win.zip",
             "macosx" => "platform-tools_r35.0.2-darwin.zip",

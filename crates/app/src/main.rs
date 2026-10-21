@@ -25,6 +25,8 @@ fn main() {
     let cfg = Config::load();
     logging::init(cfg.enable_debug);
     log::info!("APK Info Plus {} 启动", env!("CARGO_PKG_VERSION"));
+    // 上次强退可能留下几 GB 的 OBB 解压目录
+    apkinfo_core::installer::cleanup_stale_temp_dirs();
 
     // 命令行里第一个存在的文件就是要打开的；其余参数（--screenshot 等）留给 windui。
     let args: Vec<String> = std::env::args().skip(1).collect();

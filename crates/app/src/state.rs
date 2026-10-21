@@ -25,6 +25,8 @@ pub enum Msg {
     },
     Icon {
         gen: u64,
+        /// 渲染请求序号：快速连点时多个线程乱序返回，只认最新一次。
+        token: u64,
         index: usize,
         result: Result<RgbaImage, String>,
     },
@@ -84,6 +86,8 @@ pub struct AppState {
     pub icon_candidates: Signal<Vec<IconCandidate>>,
     pub icon_index: Signal<usize>,
     pub icon_loading: Signal<bool>,
+    /// 最近一次图标渲染请求的序号，见 [`Msg::Icon`]。
+    pub icon_req: Rc<Cell<u64>>,
 
     // ---- 应用名语言 ----
     pub label_locale: Signal<Option<String>>,
@@ -142,6 +146,7 @@ impl AppState {
             icon_candidates: signal(Vec::new()),
             icon_index: signal(0),
             icon_loading: signal(false),
+            icon_req: Rc::new(Cell::new(0)),
             label_locale: signal(None),
             md5: signal(String::new()),
             sha1: signal(String::new()),
