@@ -18,6 +18,11 @@ pub fn is_supported() -> bool {
 }
 
 fn current_exe() -> Result<PathBuf, String> {
+    // AppImage 里 current_exe 是每次运行都换的临时挂载点，写进系统的得是 AppImage 文件本身。
+    #[cfg(target_os = "linux")]
+    if let Some(p) = std::env::var_os("APPIMAGE") {
+        return Ok(PathBuf::from(p));
+    }
     std::env::current_exe().map_err(|e| e.to_string())
 }
 
