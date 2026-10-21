@@ -25,3 +25,12 @@ sha1 = "0.10"
 sha2 = "0.10"
 hex = "0.4"
 regex = "1"
+# 图标渲染（icon 模块）：VectorDrawable → SVG → resvg 光栅化；位图用 image 解码。
+resvg = { version = "0.48", default-features = false }
+tiny-skia = "0.12"
+image = { version = "0.25", default-features = false, features = ["png", "webp", "jpeg"] }
+roxmltree = "0.21"
+svgtypes = "0.16"
+# 签名证书解析（signature 模块）与 platform-tools 下载（tools 模块）。
+x509-parser = "0.18"
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }

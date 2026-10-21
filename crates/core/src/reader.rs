@@ -12,7 +12,11 @@ pub struct Eof {
 
 impl fmt::Display for Eof {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unexpected end of data at {} (want {} bytes, total {})", self.pos, self.want, self.len)
+        write!(
+            f,
+            "unexpected end of data at {} (want {} bytes, total {})",
+            self.pos, self.want, self.len
+        )
     }
 }
 
@@ -50,7 +54,11 @@ impl<'a> ByteReader<'a> {
     }
     fn check(&self, n: usize) -> Result<(), Eof> {
         if self.pos + n > self.data.len() {
-            return Err(Eof { pos: self.pos, want: n, len: self.data.len() });
+            return Err(Eof {
+                pos: self.pos,
+                want: n,
+                len: self.data.len(),
+            });
         }
         Ok(())
     }
@@ -83,10 +91,14 @@ impl<'a> ByteReader<'a> {
     }
     /// 不移动游标读取 u16（用于窥探 chunk 类型）。
     pub fn peek_u16(&self) -> Option<u16> {
-        self.data.get(self.pos..self.pos + 2).map(|b| u16::from_le_bytes([b[0], b[1]]))
+        self.data
+            .get(self.pos..self.pos + 2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
     }
     pub fn peek_u32_at(&self, pos: usize) -> Option<u32> {
-        self.data.get(pos..pos + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        self.data
+            .get(pos..pos + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 }
 
