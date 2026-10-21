@@ -98,6 +98,14 @@ impl ApkReader {
             .unwrap_or_default()
     }
 
+    /// 同 [`resources`](Self::resources)，字符串值按 [`ResourceTable::resources_with`] 过滤。
+    pub fn resources_with(&self, keep: impl Fn(&str, &str) -> bool) -> BTreeMap<u32, ResourceInfo> {
+        self.table
+            .as_ref()
+            .map(|t| t.resources_with(keep))
+            .unwrap_or_default()
+    }
+
     /// 读取条目内容；不存在或解压失败返回 `None`。
     pub fn read_file(&self, name: &str) -> Option<Vec<u8>> {
         let mut archive = self.archive.lock().unwrap_or_else(|e| e.into_inner());

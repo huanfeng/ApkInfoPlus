@@ -145,7 +145,7 @@ fn finish(
     };
     // 只留图标解析用得着的条目：drawable / mipmap / color 这几类，以及值里带 res/ 路径或引用的。
     // Chrome 这种带几十种语言的包，全量资源表（每条翻译都是一个 String）要占几十 MB。
-    let resources = Arc::new(icon_resources(reader.resources()));
+    let resources = Arc::new(icon_resources(reader.resources_with(icon_string)));
     reader.release_resource_table();
 
     // 主图标：资源表里 density 最高的那条；没有资源表时退回原始引用值。
@@ -231,6 +231,14 @@ fn finish(
     })
 }
 
+/// 图标解析用得着的字符串值：drawable / mipmap 的全收（文件路径），其余类型只收
+/// res/ 路径与颜色字面量——翻译文本等在汇总资源时就丢掉。
+fn icon_string(type_name: &str, value: &str) -> bool {
+    matches!(type_name, "drawable" | "mipmap")
+        || value.starts_with("res/")
+        || value.starts_with('#')
+}
+
 /// 过滤给图标渲染器的资源表，见 `finish` 里的说明。
 fn icon_resources(all: BTreeMap<u32, ResourceInfo>) -> BTreeMap<u32, ResourceInfo> {
     all.into_iter()
@@ -248,14 +256,6 @@ fn icon_resources(all: BTreeMap<u32, ResourceInfo>) -> BTreeMap<u32, ResourceInf
                     | "interpolator"
             ) || r.file_paths.iter().any(|p| p.starts_with("res/"))
                 || !r.references.is_empty()
-        })
-        .map(|(id, mut r)| {
-            // 非 res/ 开头的字符串值对图标没用（翻译文本等），顺手扔掉。
-            if !matches!(r.type_name.as_str(), "drawable" | "mipmap") {
-                r.file_paths
-                    .retain(|p| p.starts_with("res/") || p.starts_with('#'));
-            }
-            (id, r)
         })
         .collect()
 }

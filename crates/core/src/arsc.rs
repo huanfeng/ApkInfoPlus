@@ -36,20 +36,32 @@ const ENTRY_FLAG_COMPACT: u16 = 0x0008;
 // 字符串池
 
 /// resources.arsc 中的字符串池（全局 / 类型名 / 键名）。
+///
+/// 只留数据区原样字节与偏移表，取用时再解码：Chrome 这种多语言包的全局池有二十多万条，
+/// 逐条解码成 `String` 是二十多万次小分配，释放后堆也很难把这些碎块还给系统。
 #[derive(Debug, Default, Clone)]
 pub struct StringPool {
-    strings: Vec<String>,
+    data: Vec<u8>,
+    offsets: Vec<u32>,
+    utf8: bool,
 }
 
 impl StringPool {
-    pub fn get(&self, index: u32) -> Option<&str> {
-        self.strings.get(index as usize).map(|s| s.as_str())
+    /// 第 `index` 条；下标越界为 `None`，偏移或内容损坏的条目为空串。
+    pub fn get(&self, index: u32) -> Option<String> {
+        let off = *self.offsets.get(index as usize)? as usize;
+        if off >= self.data.len() {
+            return Some(String::new());
+        }
+        let mut r = ByteReader::new(&self.data);
+        r.seek(off);
+        Some(read_pool_string(&mut r, self.utf8).unwrap_or_default())
     }
     pub fn len(&self) -> usize {
-        self.strings.len()
+        self.offsets.len()
     }
     pub fn is_empty(&self) -> bool {
-        self.strings.is_empty()
+        self.offsets.is_empty()
     }
 
     /// 从 chunk 起始（type 字段）解析；结束后游标位于 chunk 末尾。
@@ -76,23 +88,21 @@ impl StringPool {
         }
         let mut offsets = Vec::with_capacity(string_count);
         for _ in 0..string_count {
-            offsets.push(r.u32()? as usize);
+            offsets.push(r.u32()?);
         }
         r.skip(style_count * 4)?;
 
-        let data_start = header_start.saturating_add(strings_start);
-        let mut strings = Vec::with_capacity(string_count);
-        for off in offsets {
-            let pos = data_start.saturating_add(off);
-            if pos >= chunk_end {
-                strings.push(String::new());
-                continue;
-            }
-            r.seek(pos);
-            strings.push(read_pool_string(r, is_utf8).unwrap_or_default());
-        }
+        // 数据区截到 chunk 末尾：损坏的偏移读不到后面别的 chunk 里去。
+        let data_start = header_start.saturating_add(strings_start).min(r.len());
+        let data_end = chunk_end.min(r.len()).max(data_start);
+        r.seek(data_start);
+        let data = r.bytes(data_end - data_start)?.to_vec();
         r.seek(chunk_end);
-        Ok(Self { strings })
+        Ok(Self {
+            data,
+            offsets,
+            utf8: is_utf8,
+        })
     }
 }
 
@@ -281,7 +291,18 @@ fn decode_locale_chars(b: [u8; 2], base: u8) -> String {
 #[derive(Debug, Clone, Default)]
 pub struct TypeConfig {
     pub config: ResourceConfig,
-    pub entries: BTreeMap<u32, ResourceEntry>,
+    /// 按条目下标升序、无重复。用有序 `Vec` 而不是 `BTreeMap`：大包有几十万个条目，
+    /// 树节点的开销与碎片都比连续数组大得多。
+    pub entries: Vec<(u32, ResourceEntry)>,
+}
+
+impl TypeConfig {
+    pub fn entry(&self, index: u32) -> Option<&ResourceEntry> {
+        self.entries
+            .binary_search_by_key(&index, |(i, _)| *i)
+            .ok()
+            .map(|i| &self.entries[i].1)
+    }
 }
 
 /// 一个资源类型（string / drawable / mipmap …）及其全部配置。
@@ -326,7 +347,6 @@ impl Package {
         (type_id as u32)
             .checked_sub(1)
             .and_then(|i| self.type_strings.get(i))
-            .map(str::to_string)
             .unwrap_or_else(|| format!("type{type_id}"))
     }
 }
@@ -413,11 +433,11 @@ impl ResourceTable {
 
     /// 条目的字符串值所指向的全局字符串（`Some(None)` 表示是字符串类型但索引越界）。
     fn entry_string(&self, cfg: &TypeConfig, entry: u32) -> Option<Option<String>> {
-        let v = cfg.entries.get(&entry)?.value?;
+        let v = cfg.entry(entry)?.value?;
         if !v.is_string() {
             return None;
         }
-        Some(self.global_strings.get(v.data).map(str::to_string))
+        Some(self.global_strings.get(v.data))
     }
 
     /// 按资源 ID 取字符串值；`locale` 为 `None` 时取默认配置（找不到再退任意配置）。
@@ -522,12 +542,18 @@ impl ResourceTable {
 
     /// 导出所有资源条目（按 ID 聚合），供图标渲染器使用。
     pub fn all_resources(&self) -> BTreeMap<u32, ResourceInfo> {
+        self.resources_with(|_, _| true)
+    }
+
+    /// 同 [`all_resources`](Self::all_resources)，但字符串值只收 `keep(类型名, 值)` 为真的。
+    /// 图标只用得着文件路径，多语言包的翻译文本在这里就丢掉，不必先全量复制一份再过滤。
+    pub fn resources_with(&self, keep: impl Fn(&str, &str) -> bool) -> BTreeMap<u32, ResourceInfo> {
         let mut results: BTreeMap<u32, ResourceInfo> = BTreeMap::new();
         for package in &self.packages {
             for spec in &package.type_specs {
                 let type_name = package.type_name(spec.id);
                 for cfg in &spec.configs {
-                    for (&entry_index, entry) in &cfg.entries {
+                    for &(entry_index, ref entry) in &cfg.entries {
                         let resource_id =
                             (package.id << 24) | ((spec.id as u32) << 16) | entry_index;
                         let info = results.entry(resource_id).or_insert_with(|| ResourceInfo {
@@ -536,15 +562,14 @@ impl ResourceTable {
                             key_name: package
                                 .key_strings
                                 .get(entry.key_index)
-                                .map(str::to_string)
                                 .unwrap_or_else(|| format!("key{entry_index}")),
                             ..Default::default()
                         });
                         let Some(v) = entry.value else { continue };
                         if v.is_string() {
                             if let Some(s) = self.global_strings.get(v.data) {
-                                if !info.file_paths.iter().any(|p| p == s) {
-                                    info.file_paths.push(s.to_string());
+                                if keep(&type_name, &s) && !info.file_paths.contains(&s) {
+                                    info.file_paths.push(s);
                                 }
                             }
                         } else if v.is_color() {
@@ -762,18 +787,23 @@ fn parse_type(
     let mut budget = chunk_end.saturating_sub(data_start) / 12;
     let mut by_offset: std::collections::HashMap<usize, ResourceEntry> =
         std::collections::HashMap::new();
-    let mut entries = BTreeMap::new();
+    let mut entries = Vec::with_capacity(offsets.len());
     for (idx, off) in offsets {
         let pos = data_start.saturating_add(off);
         if let Some(e) = by_offset.get(&pos) {
-            entries.insert(idx, e.clone());
+            entries.push((idx, e.clone()));
             continue;
         }
         r.seek(pos);
         let e = read_entry(r, chunk_end, &mut budget)?;
         by_offset.insert(pos, e.clone());
-        entries.insert(idx, e);
+        entries.push((idx, e));
     }
+    // 稀疏表按规范已升序，但文件是任意给的：稳定排序后同一下标留最后一条（与覆盖插入一致）。
+    entries.sort_by_key(|(i, _)| *i);
+    entries.reverse();
+    entries.dedup_by_key(|(i, _)| *i);
+    entries.reverse();
 
     package
         .type_spec_mut_or_insert(type_id)
@@ -938,7 +968,7 @@ mod tests {
             let mut r = ByteReader::new(&pool);
             let p = StringPool::parse(&mut r).unwrap();
             assert_eq!(
-                (p.get(0), p.get(1), p.get(2)),
+                (p.get(0).as_deref(), p.get(1).as_deref(), p.get(2)),
                 (Some("a"), Some("中文"), None)
             );
             assert_eq!(r.pos(), pool.len());
@@ -1230,6 +1260,6 @@ mod tests {
         let full = table(&["x"], &["string"], &["k"], &[type_spec_chunk(1, 1)], false);
         // 截掉 package 尾部：仍能得到全局池，不 panic
         let t = ResourceTable::parse(&full[..full.len() - 10]).unwrap();
-        assert_eq!(t.global_strings().get(0), Some("x"));
+        assert_eq!(t.global_strings().get(0).as_deref(), Some("x"));
     }
 }
