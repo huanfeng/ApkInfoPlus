@@ -16,6 +16,26 @@
 - **桌面化交互**：自绘标题栏 + 可拖侧栏 + 概览头卡片 + 带图标标签页，几乎所有字段都可选中复制（右键菜单），文件重命名（预设模板 + 校验），应用名多语言切换，文本信息（aapt2 badging 风格），完整快捷键，单实例（再次打开文件复用窗口）
 - **外观**：浅色 / 深色 / 跟随系统，自定义强调色；界面语言 zh-CN / zh-TW / zh-HK / en / ja / ko
 
+## 安装
+
+从 [Releases](https://github.com/huanfeng/ApkInfoPlus/releases) 下载：
+
+| 平台 | 文件 |
+|---|---|
+| Windows x64 | `ApkInfoPlus-<版本>-windows-x86_64.zip`（解压即用） |
+| macOS（Apple Silicon / Intel 通用） | `ApkInfoPlus-<版本>-macos-universal.dmg` |
+| Linux x64 | `ApkInfoPlus-<版本>-linux-x86_64.AppImage` 或 `.tar.gz` |
+
+Windows 也可以用 [Scoop](https://scoop.sh)：
+
+```powershell
+scoop bucket add huanfeng https://github.com/huanfeng/scoop-bucket
+scoop install apkinfoplus
+```
+
+macOS 版只做了 ad-hoc 签名，没有经过 Apple 公证：第一次打开时在 Finder 里右键「打开」，
+或执行 `xattr -dr com.apple.quarantine "/Applications/APK Info Plus.app"`。
+
 ## 快捷键
 
 | 键 | 作用 |
@@ -31,9 +51,15 @@
 
 ## 构建
 
-工作区的 `Cargo.toml` 用 `[patch.crates-io]` 把 `windui` 指向本地的 `wind-ui-rust` 源码
-（期望与本仓库并排放在 `../../../windinput/wind-ui-rust`）；没有这份源码时删掉那一段即可用 crates.io 的发布版，
-只是会缺少尚未发布的 API。Windows 可执行文件的图标由 `crates/app/build.rs` 在构建时嵌入，
+`windui` 默认用 crates.io 的发布版。要连同本地的 `wind-ui-rust` 源码一起改，在仓库根目录建
+`.cargo/config.toml`（已在 .gitignore 里）：
+
+```toml
+[patch.crates-io]
+windui = { path = "../wind-ui-rust" }   # 相对仓库根目录
+```
+
+Windows 可执行文件的图标由 `crates/app/build.rs` 在构建时嵌入，
 需要 `rc.exe` / `llvm-rc` / `windres` 之一在 PATH 里，找不到时只是没有图标。
 
 需要 Rust 1.85+（edition 2021，工作区使用 `std::sync::LazyLock` 等较新 API）。
@@ -54,9 +80,17 @@ Linux 运行期依赖：fontconfig（选字）；X11 或 Wayland（设 `WINDUI_B
 ```
 crates/core   apkinfo-core：解析核心库（zip / axml / arsc / manifest / icon / signature / adb / installer / tools）+ apkinfo 命令行
 crates/app    apkinfoplus：windui 桌面应用（ui / state / actions / config / i18n）
+packaging/                                                 macOS Info.plist、Linux .desktop
+scripts/                                                   版本号同步与各平台打包脚本（Release 工作流调用）
 docs/superpowers/specs/2026-10-21-apkinfoplus-design.md   设计文档
-IMPLEMENTATION_PLAN.md                                     阶段计划
 ```
+
+## 发布
+
+推送 `v*` 标签触发 `.github/workflows/release.yml`：三平台构建打包，创建 GitHub Release，
+再通知 [scoop-bucket](https://github.com/huanfeng/scoop-bucket) 更新 manifest（需要仓库 Secret
+`SCOOP_BUCKET_GITHUB_TOKEN`，未配置时跳过）。版本号以标签为准，由 `scripts/set-version.py` 写入
+`Cargo.toml` 与 Windows 资源。
 
 配置文件位于平台配置目录下的 `apkinfoplus/config.toml`（Linux `~/.config/apkinfoplus/`），
 日志与下载的 platform-tools 位于数据目录 `apkinfoplus/`（Linux `~/.local/share/apkinfoplus/`）。

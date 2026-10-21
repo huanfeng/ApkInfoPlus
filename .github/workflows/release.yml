@@ -1,0 +1,182 @@
+name: Release
+
+# 推送 v* 标签：三平台构建打包 → 创建 GitHub Release → 通知 scoop bucket 更新。
+# scoop 一步需要仓库 Secret SCOOP_BUCKET_GITHUB_TOKEN（能向 huanfeng/scoop-bucket 发 dispatch）。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（不带 v，仅试打包，不发布）"
+        required: true
+        default: "0.0.0"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # rc.exe：build.rs 编译 exe 图标与版本信息要用
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: 版本号
+        id: ver
+        shell: bash
+        run: |
+          V="${{ inputs.version }}"; [ -n "$V" ] || V="${GITHUB_REF_NAME#v}"
+          python scripts/set-version.py "$V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: 构建
+        run: cargo build --release -p apkinfoplus
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+      - name: 打包
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory -Force dist, stage | Out-Null
+          Copy-Item target/release/apkinfoplus.exe, LICENSE, README.md stage/
+          Compress-Archive -Path stage/* -DestinationPath "dist/ApkInfoPlus-$v-windows-x86_64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  build-linux:
+    # 22.04：产物依赖的 glibc 版本更低，老一些的发行版也能跑
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 版本号
+        id: ver
+        run: |
+          V="${{ inputs.version }}"; [ -n "$V" ] || V="${GITHUB_REF_NAME#v}"
+          python3 scripts/set-version.py "$V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: 构建
+        run: cargo build --release -p apkinfoplus
+      - name: 打包
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          curl -fsSL -o appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          APPIMAGETOOL="$PWD/appimagetool" scripts/package-linux.sh "${{ steps.ver.outputs.version }}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: 版本号
+        id: ver
+        run: |
+          V="${{ inputs.version }}"; [ -n "$V" ] || V="${GITHUB_REF_NAME#v}"
+          python3 scripts/set-version.py "$V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: 构建
+        run: |
+          cargo build --release -p apkinfoplus --target aarch64-apple-darwin
+          cargo build --release -p apkinfoplus --target x86_64-apple-darwin
+      - name: 打包
+        run: scripts/package-macos.sh "${{ steps.ver.outputs.version }}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*
+
+  release:
+    needs: [build-windows, build-linux, build-macos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 更新说明
+        run: |
+          # 上一个 tag 到本 tag 的提交，按 conventional commit 前缀分组
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          git log --no-merges --format='%s (%h)' "${prev:+$prev..}${GITHUB_REF_NAME}" > commits.txt
+          : > notes.md
+          section() {
+            local lines
+            lines=$(grep -E "$2" commits.txt || true)
+            if [ -n "$lines" ]; then
+              printf '## %s\n\n%s\n\n' "$1" "$(sed 's/^/- /' <<< "$lines")" >> notes.md
+            fi
+          }
+          section "新功能" '^feat(\(|:|!)'
+          section "修复" '^fix(\(|:|!)'
+          section "性能" '^perf(\(|:|!)'
+          other=$(grep -vE '^(feat|fix|perf)(\(|:|!)' commits.txt || true)
+          if [ -n "$other" ]; then
+            printf '## 其他\n\n%s\n' "$(sed 's/^/- /' <<< "$other")" >> notes.md
+          fi
+          cat notes.md
+      - name: 校验和
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: APK Info Plus ${{ github.ref_name }}
+          body_path: notes.md
+          files: dist/*
+
+  publish-scoop:
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 通知 scoop bucket
+        env:
+          GH_TOKEN: ${{ secrets.SCOOP_BUCKET_GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::未配置 SCOOP_BUCKET_GITHUB_TOKEN，跳过 scoop 更新"
+            exit 0
+          fi
+          V="${GITHUB_REF_NAME#v}"
+          jq -n \
+            --arg repo "$REPO" \
+            --arg ver "$V" \
+            --arg asset "ApkInfoPlus-$V-windows-x86_64.zip" \
+            '{
+              event_type: "update-scoop-manifest",
+              client_payload: {
+                app: "apkinfoplus",
+                repo: $repo,
+                version: $ver,
+                asset_name: $asset,
+                bin: "apkinfoplus.exe",
+                description: "Lightweight cross-platform viewer and installer for APK/XAPK/APKM/APKS files.",
+                homepage: "https://github.com/huanfeng/ApkInfoPlus",
+                license: "MIT"
+              }
+            }' > payload.json
+          curl -fsS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/huanfeng/scoop-bucket/dispatches \
+            -d @payload.json

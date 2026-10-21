@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=APK Info Plus
+Comment=View Android package information and install to devices
+Exec=apkinfoplus %F
+Icon=apkinfoplus
+Terminal=false
+Categories=Development;Utility;
+MimeType=application/vnd.android.package-archive;application/x-xapk;application/x-apkm;application/x-apks;
