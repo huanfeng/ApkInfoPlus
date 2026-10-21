@@ -153,14 +153,17 @@ pub struct Output {
 impl Output {
     /// adb install 的失败原因常在 stdout 的 `Failure [...]` 里，而退出码仍可能是 0。
     pub fn failure_reason(&self) -> Option<String> {
+        // 只认行首的失败标记：push 成功输出里带的文件路径也可能含 "Failure" 这个词
         for text in [&self.stdout, &self.stderr] {
-            if let Some(idx) = text.find("Failure") {
-                let line = text[idx..].lines().next().unwrap_or("").trim();
-                return Some(line.to_string());
-            }
-            if let Some(idx) = text.find("Exception") {
-                let line = text[idx..].lines().next().unwrap_or("").trim();
-                return Some(line.to_string());
+            for line in text.lines() {
+                let l = line.trim();
+                if l.starts_with("Failure")
+                    || l.starts_with("adb: failed")
+                    || l.starts_with("adb: error")
+                    || l.starts_with("Exception")
+                {
+                    return Some(l.to_string());
+                }
             }
         }
         if !self.success {
@@ -219,7 +222,14 @@ pub fn run(adb: &Path, args: &[String], cancel: &Arc<AtomicBool>) -> Result<Outp
         match child.try_wait() {
             Ok(Some(st)) => break st,
             Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => {
+                // 等不下去也不能把子进程和两个读管道线程扔在那里
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = out_thread.join();
+                let _ = err_thread.join();
+                return Err(e.to_string());
+            }
         }
     };
     let stdout = String::from_utf8_lossy(&out_thread.join().unwrap_or_default()).into_owned();

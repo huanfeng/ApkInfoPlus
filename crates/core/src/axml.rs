@@ -53,6 +53,7 @@ pub fn is_binary_xml(bytes: &[u8]) -> bool {
 /// 头部（魔数、字符串池）损坏时返回错误；之后的 chunk 损坏则停止并返回已解析部分，
 /// 因为混淆 APK 常在尾部塞垃圾 chunk，而前面的 `<manifest>` 信息仍然有用。
 pub fn parse_document(bytes: &[u8]) -> Result<XmlElement, AxmlError> {
+    const MAX_ELEMENT_DEPTH: usize = 256;
     let mut r = ByteReader::new(bytes);
     let strings = read_header(&mut r)?;
     let mut res_map: Vec<u32> = Vec::new();
@@ -68,6 +69,13 @@ pub fn parse_document(bytes: &[u8]) -> Result<XmlElement, AxmlError> {
                 res_map = parse_resource_id_map(&mut r, &chunk);
             }
             START_ELEMENT_TAG => match parse_start_element(&mut r, &strings, &res_map, chunk.end) {
+                // 深度封顶：树的 Drop 与后续遍历都是递归的，几万层嵌套会打穿线程栈。
+                // 超深的元素挂到当前最深一层作为兄弟，内容不丢，只是层级被压平。
+                Ok(el) if stack.len() >= MAX_ELEMENT_DEPTH => {
+                    if let Some(parent) = stack.last_mut() {
+                        parent.children.push(el);
+                    }
+                }
                 Ok(el) => stack.push(el),
                 Err(e) => {
                     log::warn!("axml: start element at {} truncated: {e}", chunk.start);
@@ -370,7 +378,7 @@ fn decode_string_pool(
         return Ok(Vec::new());
     }
     // 先校验偏移表容量再分配，防止损坏的计数导致巨量内存分配
-    let table_bytes = num_strings
+    num_strings
         .checked_add(num_styles)
         .and_then(|n| n.checked_mul(4))
         .filter(|&n| n <= data.len())
@@ -379,7 +387,6 @@ fn decode_string_pool(
                 "offset table overflow: {num_strings}+{num_styles} entries"
             ))
         })?;
-    let _ = table_bytes;
 
     let strings_start = string_start
         .checked_sub(header_size)
@@ -657,13 +664,14 @@ fn format_value(
             }
             if data == 0 { "<undefined>" } else { "<empty>" }.to_string()
         }
-        RES_TYPE_REFERENCE => format!("@res/0x{}", dart_hex(data)),
-        RES_TYPE_ATTRIBUTE => format!("@attr/0x{}", dart_hex(data)),
+        // 引用按无符号输出：0x80000000 以上的 ID 若带负号，下游 `@res/0x` 解析会静默丢掉引用
+        RES_TYPE_REFERENCE => format!("@res/0x{:x}", data as u32),
+        RES_TYPE_ATTRIBUTE => format!("@attr/0x{:x}", data as u32),
         RES_TYPE_STRING => safe_get(strings, raw_index).to_string(),
         RES_TYPE_FLOAT => dart_double(f32::from_bits(u) as f64),
         RES_TYPE_DIMENSION => format!("{}{}", dart_double(complex_value(u)), dimension_unit(u)),
         RES_TYPE_FRACTION => format!("{}{}", dart_double(complex_value(u)), fraction_unit(u)),
-        RES_TYPE_DYNAMIC_REFERENCE => format!("@dyn/0x{}", dart_hex(data)),
+        RES_TYPE_DYNAMIC_REFERENCE => format!("@dyn/0x{:x}", data as u32),
         RES_TYPE_INT_DEC => data.to_string(),
         RES_TYPE_INT_HEX => format!("0x{u:x}"),
         // Android 语义是非零即真（aapt 写入 0xffffffff）。Dart 版因有符号比较总得到 false，这里按规范修正。
@@ -671,15 +679,6 @@ fn format_value(
         RES_TYPE_INT_COLOR_ARGB8 | RES_TYPE_INT_COLOR_ARGB4 => format!("#{u:08x}"),
         RES_TYPE_INT_COLOR_RGB8 | RES_TYPE_INT_COLOR_RGB4 => format!("#ff{:06x}", u & 0x00ff_ffff),
         _ => format!("0x{u:x}"),
-    }
-}
-
-/// Dart `int.toRadixString(16)` 对有符号 32 位值的行为（负数带 `-`）。
-fn dart_hex(v: i32) -> String {
-    if v < 0 {
-        format!("-{:x}", -(v as i64))
-    } else {
-        format!("{v:x}")
     }
 }
 

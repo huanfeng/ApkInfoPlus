@@ -108,7 +108,7 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
 
 fn load_apk(path: &Path, size: u64) -> Result<Loaded, LoadError> {
     let reader = ApkReader::open(path).map_err(|e| LoadError::Zip(e.to_string()))?;
-    finish(path, size, ArchiveKind::Apk, reader, None, None)
+    finish(path, size, ArchiveKind::Apk, reader, None)
 }
 
 fn load_archive(path: &Path, size: u64, kind: ArchiveKind) -> Result<Loaded, LoadError> {
@@ -117,12 +117,12 @@ fn load_archive(path: &Path, size: u64, kind: ArchiveKind) -> Result<Loaded, Loa
     if kind == ArchiveKind::Apk {
         // 改了扩展名的 APK（zip 根目录就是 AndroidManifest.xml）。
         let reader = ApkReader::open(path).map_err(|e| LoadError::Zip(e.to_string()))?;
-        return finish(path, size, ArchiveKind::Apk, reader, None, None);
+        return finish(path, size, ArchiveKind::Apk, reader, None);
     }
     // take 而不是 clone：base.apk 可以有上百 MB，解析期不该在内存里放两份。
     let base_bytes = contents.base_bytes.take().ok_or(LoadError::NoBaseApk)?;
     let reader = ApkReader::from_bytes(base_bytes).map_err(|e| LoadError::Zip(e.to_string()))?;
-    finish(path, size, kind, reader, Some(contents), None)
+    finish(path, size, kind, reader, Some(contents))
 }
 
 fn finish(
@@ -131,7 +131,6 @@ fn finish(
     kind: ArchiveKind,
     mut reader: ApkReader,
     contents: Option<archive::ArchiveContents>,
-    _unused: Option<()>,
 ) -> Result<Loaded, LoadError> {
     let mut meta = match reader.parse() {
         Some(m) => m,

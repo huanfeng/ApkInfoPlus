@@ -25,17 +25,15 @@ impl RenameState {
     }
 }
 
-/// 当前文件的扩展名（含点，小写），缺省 `.apk`。
+/// 预设用的扩展名：按解析出的容器类型给，`.apk.1` / `.zip` 这类原名不能照搬（过不了校验）。
 fn current_ext(state: &AppState) -> String {
-    state
-        .file_path
-        .with(|p| {
-            p.as_ref().and_then(|p| {
-                p.extension()
-                    .map(|e| format!(".{}", e.to_string_lossy().to_lowercase()))
-            })
-        })
-        .unwrap_or_else(|| ".apk".into())
+    match state.current_info().map(|i| i.kind) {
+        Some(apkinfo_core::info::ArchiveKind::Xapk) => ".xapk",
+        Some(apkinfo_core::info::ArchiveKind::Apkm) => ".apkm",
+        Some(apkinfo_core::info::ArchiveKind::Apks) => ".apks",
+        _ => ".apk",
+    }
+    .to_string()
 }
 
 fn preset(state: &AppState, which: Preset) -> String {
@@ -51,8 +49,8 @@ fn preset(state: &AppState, which: Preset) -> String {
     } else {
         label
     };
-    let version = info.meta.version_name.clone().unwrap_or_default();
-    let package = info.meta.package_name.clone().unwrap_or_default();
+    let version = actions::sanitize_file_name(info.meta.version_name.as_deref().unwrap_or(""));
+    let package = actions::sanitize_file_name(info.meta.package_name.as_deref().unwrap_or(""));
     let ext = current_ext(state);
     match which {
         Preset::Default => format!("{}-{}{}", label, version, ext),
@@ -96,8 +94,22 @@ pub fn validate(name: &str, dir: &Path, old: &Path) -> Result<PathBuf, String> {
     {
         return Err(tr!("rename.must_end_with_apk"));
     }
+    // Windows 保留设备名（CON.apk 也不行）
+    let stem_upper = trimmed.split('.').next().unwrap_or("").to_ascii_uppercase();
+    const RESERVED: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    if RESERVED.contains(&stem_upper.as_str()) || trimmed.ends_with('.') {
+        return Err(tr!("rename.invalid_chars"));
+    }
     let dest = dir.join(trimmed);
-    if dest != old && dest.exists() {
+    // 只改大小写时在不区分大小写的文件系统上 `exists()` 为真，但那正是用户想要的改名
+    let same_ignoring_case = dest.file_name().zip(old.file_name()).is_some_and(|(a, b)| {
+        a.to_string_lossy()
+            .eq_ignore_ascii_case(&b.to_string_lossy())
+    });
+    if dest != old && !same_ignoring_case && dest.exists() {
         return Err(tr!("rename.exists"));
     }
     Ok(dest)
@@ -116,7 +128,8 @@ fn do_rename(state: &AppState, ctx: &mut EventCtx) {
                 state.show_rename.set(false);
                 return;
             }
-            // 先释放对旧文件的占用：IconSession 持有打开的 zip，Windows 上改名会被拒绝。
+            // 放掉 IconSession 里打开的 zip：std 打开文件时带 FILE_SHARE_DELETE，改名本身能成功，
+            // 但旧会话指向的是改名前的路径，留着只会让后续图标切换读到一个「不存在」的文件。
             *state.session.borrow_mut() = None;
             match std::fs::rename(&old, &dest) {
                 Ok(()) => {
@@ -228,5 +241,7 @@ mod tests {
         assert!(validate("name.txt", &dir, &old).is_err());
         assert!(validate("ok-1.0.apk", &dir, &old).is_ok());
         assert!(validate("ok.XAPK", &dir, &old).is_ok());
+        assert!(validate("CON.apk", &dir, &old).is_err());
+        assert!(validate("lpt1.xapk", &dir, &old).is_err());
     }
 }

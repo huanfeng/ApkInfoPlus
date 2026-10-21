@@ -32,6 +32,8 @@ const MAX_PREALLOC: u64 = 64 * 1024 * 1024;
 
 pub struct Archive<R: Read + Seek> {
     inner: zip::ZipArchive<R>,
+    /// 小写条目名 → 原名，首次大小写不敏感查找时建一次；否则每次未命中都要扫全部条目。
+    lower_names: std::cell::OnceCell<std::collections::HashMap<String, String>>,
 }
 
 impl Archive<BufReader<File>> {
@@ -53,6 +55,7 @@ impl<R: Read + Seek> Archive<R> {
     pub fn new(reader: R) -> Result<Self, ZipError> {
         Ok(Self {
             inner: zip::ZipArchive::new(reader)?,
+            lower_names: std::cell::OnceCell::new(),
         })
     }
 
@@ -81,9 +84,15 @@ impl<R: Read + Seek> Archive<R> {
             return Some(trimmed.to_string());
         }
         let lower = trimmed.to_lowercase();
-        self.file_names()
-            .into_iter()
-            .find(|n| n.trim_start_matches('/').to_lowercase() == lower)
+        let map = self.lower_names.get_or_init(|| {
+            let mut m = std::collections::HashMap::new();
+            for n in self.file_names() {
+                m.entry(n.trim_start_matches('/').to_lowercase())
+                    .or_insert(n);
+            }
+            m
+        });
+        map.get(&lower).cloned()
     }
 
     pub fn contains(&self, name: &str) -> bool {

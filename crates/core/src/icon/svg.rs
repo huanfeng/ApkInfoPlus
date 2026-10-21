@@ -11,6 +11,9 @@
 use std::fmt::Write as _;
 use std::rc::Rc;
 
+/// group 嵌套上限；真实 VectorDrawable 用不到两位数，再深就是构造出来打栈的。
+const MAX_GROUP_DEPTH: u32 = 64;
+
 use crate::axml::XmlElement;
 
 use super::color::{self, parse_dimension};
@@ -406,6 +409,8 @@ pub(crate) fn vector_viewport(v: &XmlElement) -> (f32, f32) {
 pub(crate) struct SvgBuilder<'r> {
     res: &'r mut dyn PaintResolver,
     defs: String,
+    /// 当前 group 嵌套深度，见 `emit_group`。
+    depth: u32,
     next_id: usize,
     /// 实际产生的填充 / 描边数量；为 0 说明什么都没画（对应 Dart 的 `_didDraw`）。
     pub painted: usize,
@@ -416,6 +421,7 @@ impl<'r> SvgBuilder<'r> {
         Self {
             res,
             defs: String::new(),
+            depth: 0,
             next_id: 0,
             painted: 0,
         }
@@ -476,6 +482,16 @@ impl<'r> SvgBuilder<'r> {
     }
 
     fn emit_group(&mut self, out: &mut String, g: &XmlElement, alpha: f32) {
+        // 恶意 drawable 可以嵌套上万层 group，递归会把后台线程 2MB 的栈打穿（进程直接中止）。
+        if self.depth >= MAX_GROUP_DEPTH {
+            return;
+        }
+        self.depth += 1;
+        self.emit_group_inner(out, g, alpha);
+        self.depth -= 1;
+    }
+
+    fn emit_group_inner(&mut self, out: &mut String, g: &XmlElement, alpha: f32) {
         let d = |n: &str, fb: f32| parse_dimension(attr(g, n), fb);
         let (rot, px, py) = (d("rotation", 0.0), d("pivotX", 0.0), d("pivotY", 0.0));
         let (sx, sy) = (d("scaleX", 1.0), d("scaleY", 1.0));

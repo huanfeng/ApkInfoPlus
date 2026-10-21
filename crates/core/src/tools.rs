@@ -312,6 +312,8 @@ fn extract_platform_tools(bytes: &[u8], dir: &Path) -> Result<(), String> {
         {
             use std::os::unix::fs::PermissionsExt;
             if let Some(mode) = entry.unix_mode() {
+                // 只保留普通权限位：zip 里带 setuid / setgid 的条目不该原样落地
+                let mode = mode & 0o755;
                 let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(mode));
             } else if dest.extension().is_none() {
                 let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));

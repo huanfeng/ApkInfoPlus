@@ -110,7 +110,20 @@ impl<'a> IconRenderer<'a> {
 
 /// 解码 PNG / WebP / JPEG 为 RGBA（XAPK 的 `icon.png` 等直接用）。
 pub fn decode_bitmap(bytes: &[u8]) -> Option<RgbaImage> {
-    match image::load_from_memory(bytes) {
+    // 归档包外层的 icon.png 可以是任意大的图：按边长封顶，而不只是 image 默认的分配上限。
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    let decoded = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()
+        .and_then(|mut r| {
+            r.limits(limits);
+            r.decode()
+                .map_err(|e| log::debug!("icon: decode failed: {e}"))
+                .ok()
+        });
+    match decoded.ok_or(()) {
         Ok(img) => {
             let rgba = img.to_rgba8();
             let (width, height) = rgba.dimensions();
@@ -120,10 +133,7 @@ pub fn decode_bitmap(bytes: &[u8]) -> Option<RgbaImage> {
                 data: rgba.into_raw(),
             })
         }
-        Err(e) => {
-            log::debug!("icon: decode failed: {e}");
-            None
-        }
+        Err(()) => None,
     }
 }
 
