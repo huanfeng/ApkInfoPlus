@@ -6,6 +6,7 @@
 pub mod apk;
 pub mod arsc;
 pub mod axml;
+pub mod icon;
 pub mod info;
 pub mod manifest;
 pub mod model;
