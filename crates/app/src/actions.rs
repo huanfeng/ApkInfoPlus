@@ -47,7 +47,7 @@ fn guarded<T>(what: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, St
 
 /// 正在给这个文档安装时，阻止会动它的操作（关闭 / 重新解析 / 改名），并提示。
 fn blocked_by_install(state: &AppState, ctx: &mut EventCtx, doc: &Doc) -> bool {
-    if state.install.installing.get() && state.install.doc_id.get() == doc.id {
+    if state.install.installing.get() && state.install.is_installing_doc(doc.id) {
         ctx.toast(tr!("install.installing"));
         true
     } else {
@@ -914,7 +914,7 @@ pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
             Err(e) => ctx.toast_err(tr!("icon.export_failed", error = e)),
         },
         Msg::Devices(result) => crate::ui::install::on_devices(state, ctx, result),
-        Msg::Install(ev) => crate::ui::install::on_event(state, ctx, ev),
+        Msg::Install(m) => crate::ui::install::on_msg(state, ctx, m),
         Msg::Download(ev) => crate::ui::settings::on_download_event(state, ctx, ev),
         Msg::Shortcut(s) => match s {
             crate::Shortcut::Open => pick_file(state, ctx),

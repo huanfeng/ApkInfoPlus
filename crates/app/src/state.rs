@@ -47,7 +47,7 @@ pub enum Msg {
     /// 图标导出结束。
     Exported(Result<PathBuf, String>),
     Devices(Result<Vec<apkinfo_core::adb::AdbDevice>, String>),
-    Install(apkinfo_core::installer::InstallEvent),
+    Install(crate::ui::install::InstallMsg),
     Download(apkinfo_core::tools::DownloadEvent),
     /// 窗口级快捷键（`App::on_shortcut` 拿不到 ctx，转成消息执行）。
     Shortcut(crate::Shortcut),

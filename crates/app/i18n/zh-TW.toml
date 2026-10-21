@@ -162,6 +162,13 @@ success = "重新命名成功"
 failed = "重新命名失敗: {error}"
 
 [install]
+files = "安裝包"
+selected_files = "已選 {count} 個安裝包"
+no_file_selection = "請至少選擇一個安裝包"
+waiting = "等待中"
+partial = "部分成功"
+summary = "成功 {ok} · 失敗 {failed}"
+splits_multi_hint = "選取了多個安裝包，封存包將安裝其全部分包；只選一個時可逐個勾選。"
 title = "安裝到裝置"
 base_and_language = "基礎包 + 語言包"
 install_to_device = "安裝到裝置"

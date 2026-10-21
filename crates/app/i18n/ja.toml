@@ -161,6 +161,13 @@ success = "名前を変更しました"
 failed = "名前の変更に失敗しました: {error}"
 
 [install]
+files = "パッケージ"
+selected_files = "{count} 個のパッケージを選択"
+no_file_selection = "パッケージを 1 つ以上選択してください"
+waiting = "待機中"
+partial = "一部成功"
+summary = "成功 {ok} · 失敗 {failed}"
+splits_multi_hint = "複数のパッケージを選択中のため、アーカイブはすべての分割 APK をインストールします。1 つだけ選択すると個別に選べます。"
 title = "デバイスにインストール"
 base_and_language = "ベース + 言語パック"
 install_to_device = "デバイスにインストール"

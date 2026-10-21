@@ -161,6 +161,13 @@ success = "Renamed successfully"
 failed = "Rename failed: {error}"
 
 [install]
+files = "Packages"
+selected_files = "{count} package(s) selected"
+no_file_selection = "Select at least one package"
+waiting = "Waiting"
+partial = "Partially succeeded"
+summary = "{ok} succeeded · {failed} failed"
+splits_multi_hint = "Multiple packages are selected, so archives install all their splits. Select a single package to choose splits."
 title = "Install to Device"
 base_and_language = "Base + languages"
 install_to_device = "Install to device"
