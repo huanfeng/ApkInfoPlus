@@ -363,6 +363,7 @@ fn build(state: &AppState) -> Element {
                         .fg_role(Role::TextSubtle),
                 ),
         ))
+        .child(file_association_card())
         .child(Element::card(
             tr!("settings.enable_debug"),
             Element::col()
@@ -772,6 +773,85 @@ fn build(state: &AppState) -> Element {
         .child(sidebar)
         .child(Element::divider())
         .child(content.weight(1.0))
+}
+
+/// 「文件关联」卡片：注册 / 取消，以及跳到系统「默认应用」设置（Win10+ 用户选过别的程序时只能去那里改）。
+fn file_association_card() -> Element {
+    let status_text = |on: bool| {
+        if on {
+            tr!("settings.assoc_status_on")
+        } else {
+            tr!("settings.assoc_status_off")
+        }
+    };
+    let status = signal(status_text(crate::assoc::is_registered()));
+    let exts = crate::assoc::EXTENSIONS
+        .iter()
+        .map(|e| format!(".{}", e))
+        .collect::<Vec<_>>()
+        .join(" / ");
+    let mut buttons = Element::row()
+        .spacing(8)
+        .child(
+            Element::button(t!("settings.assoc_register"))
+                .small()
+                .on_click(move |ctx| match crate::assoc::register() {
+                    Ok(()) => {
+                        status.set(status_text(crate::assoc::is_registered()));
+                        ctx.toast_ok(tr!("settings.assoc_done"));
+                    }
+                    Err(e) => ctx.toast_err(e),
+                }),
+        )
+        .child(
+            Element::button(t!("settings.assoc_unregister"))
+                .small()
+                .neutral()
+                .outline_soft()
+                .on_click(move |ctx| match crate::assoc::unregister() {
+                    Ok(()) => status.set(status_text(crate::assoc::is_registered())),
+                    Err(e) => ctx.toast_err(e),
+                }),
+        );
+    if cfg!(target_os = "windows") {
+        buttons = buttons.child(
+            Element::button(t!("settings.assoc_open_system"))
+                .small()
+                .neutral()
+                .outline_soft()
+                .on_click(|ctx| {
+                    if let Err(e) = crate::assoc::open_system_settings() {
+                        ctx.toast_err(e);
+                    }
+                }),
+        );
+    }
+    let body = if crate::assoc::is_supported() {
+        Element::col()
+            .width_match()
+            .spacing(8)
+            .child(Element::setting_row_desc(
+                tr!("settings.assoc_types"),
+                tr!("settings.assoc_desc"),
+                Element::label(exts)
+                    .font_size(13.0)
+                    .fg_role(Role::TextMuted),
+            ))
+            .child(Element::setting_row(
+                tr!("settings.assoc_status"),
+                Element::label(status)
+                    .font_size(13.0)
+                    .fg_role(Role::TextMuted),
+            ))
+            .child(buttons)
+    } else {
+        Element::col().width_match().child(
+            Element::label(t!("settings.assoc_unsupported"))
+                .font_size(12.5)
+                .fg_role(Role::TextMuted),
+        )
+    };
+    Element::card(tr!("settings.file_association"), body)
 }
 
 fn short_url(url: &str) -> String {
