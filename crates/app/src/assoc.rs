@@ -7,7 +7,9 @@
 //! - Linux：写 `~/.local/share` 下的 .desktop 与 MIME 定义，再用 `xdg-mime` 设为默认。
 //! - macOS：关联由 .app 包的 Info.plist 声明，程序里不做。
 
+#[cfg(any(windows, target_os = "linux"))]
 use std::path::PathBuf;
+#[cfg(any(windows, target_os = "linux"))]
 use std::process::Command;
 
 /// 关联的扩展名（不含点）。`.zip` 太宽泛，不抢。
@@ -17,6 +19,8 @@ pub fn is_supported() -> bool {
     cfg!(any(target_os = "windows", target_os = "linux"))
 }
 
+// macOS 由 Info.plist 声明关联，用不到。
+#[cfg(any(windows, target_os = "linux"))]
 fn current_exe() -> Result<PathBuf, String> {
     // AppImage 里 current_exe 是每次运行都换的临时挂载点，写进系统的得是 AppImage 文件本身。
     #[cfg(target_os = "linux")]
@@ -44,6 +48,8 @@ pub fn open_system_settings() -> Result<(), String> {
     imp::open_system_settings()
 }
 
+// macOS 由 Info.plist 声明关联，用不到。
+#[cfg(any(windows, target_os = "linux"))]
 fn run(cmd: &mut Command) -> Result<String, String> {
     #[cfg(windows)]
     {
