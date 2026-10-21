@@ -90,7 +90,9 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
             super::PAGE_PAD,
         ))
         .child(
+            // 标签条与内容之间默认空 16px，再加页面内边距就显得空；这里收掉，只留页面那一圈。
             Element::tabs_icons(doc.tab, pages)
+                .spacing(2)
                 .fill()
                 .bg_role(Role::Surface)
                 .corner(super::CARD_CORNER)
@@ -487,10 +489,10 @@ fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
     Element::col()
         .fill()
         .padding_edges(Insets::new(
-            super::PAGE_PAD,
-            super::CARD_GAP,
-            super::PAGE_PAD,
-            super::PAGE_PAD,
+            super::TAB_PAD,
+            super::TAB_PAD,
+            super::TAB_PAD,
+            super::TAB_PAD,
         ))
         .spacing(10)
         .child(header)
@@ -844,10 +846,10 @@ fn text_info(state: &AppState, info: Rc<ApkInfo>) -> Element {
     Element::col()
         .fill()
         .padding_edges(Insets::new(
-            super::PAGE_PAD,
-            super::CARD_GAP,
-            super::PAGE_PAD,
-            super::PAGE_PAD,
+            super::TAB_PAD,
+            super::TAB_PAD,
+            super::TAB_PAD,
+            super::TAB_PAD,
         ))
         .spacing(10)
         .child(

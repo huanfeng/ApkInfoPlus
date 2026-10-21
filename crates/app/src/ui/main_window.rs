@@ -319,7 +319,10 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
         .child(texts)
         .child(side);
     if entry.active {
-        row = row.bg_role_alpha(Role::Accent, 0.12);
+        // 从外部打开的文件排在列表末尾：切到它时把这一行滚进视口。
+        row = row
+            .bg_role_alpha(Role::Accent, 0.12)
+            .reveal_when(state.reveal_active);
     }
     let hay = format!("{}\n{}\n{}\n{}", title, subtitle, file_name, package).to_lowercase();
     row.visible_when(move || {

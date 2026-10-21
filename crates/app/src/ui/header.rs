@@ -136,16 +136,17 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             .font_size(24.0)
             .font_weight(700)
             .fg_role(Role::Text)
-            .max_lines(1)
+            .max_lines(2)
             .truncate(Truncate::End),
         doc.display_label(),
     );
-    // 应用名独占一行并按宽度截断；徽章挪到版本那一行，长名字 + 多签名方案也不会被挤到按钮下面。
-    let mut name_row = Element::row()
+    // 标题行：应用名 + 格式徽章（+ 切换语言），放不下就折行；名字本身过长时最多两行。
+    let mut name_row = Element::flow()
         .width_match()
-        .cross(Align::Center)
         .spacing(10)
-        .child(name_label.weight(1.0));
+        .run_spacing(4)
+        .child(name_label)
+        .child(super::kind_badge(info.kind));
     if has_alternatives {
         let d = doc.clone();
         name_row = name_row.child(
@@ -176,21 +177,36 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             format!("{} {}", tr!("tab.signature"), names.join(" · "))
         }
     });
-    let mut badges = Element::row()
-        .cross(Align::Center)
-        .spacing(6)
-        .child(super::kind_badge(info.kind))
+    let version = match (&meta.version_name, meta.version_code) {
+        (Some(n), Some(c)) => format!("{} ({})", n, c),
+        (Some(n), None) => n.clone(),
+        (None, Some(c)) => format!("({})", c),
+        (None, None) => String::new(),
+    };
+
+    // 版本行：版本号 + 签名 / 分包徽章，同样放不下就折行，版本号过长自身换行。
+    let mut version_row = Element::flow()
+        .width_match()
+        .spacing(8)
+        .run_spacing(4)
+        .child(super::with_copy_menu(
+            Element::label(version.clone())
+                .font_size(16.0)
+                .font_weight(500)
+                .fg_role(Role::Text),
+            version.clone(),
+        ))
         .child(
             Element::badge_intent(schemes, Intent::Success)
                 .visible_when(move || schemes.with(|t| !t.is_empty())),
         );
     if info.is_archive() {
-        badges = badges.child(Element::badge_intent(
+        version_row = version_row.child(Element::badge_intent(
             tr!("field.split_badge", count = info.splits.len() as i64),
             Intent::Primary,
         ));
         if !info.obbs.is_empty() {
-            badges = badges.child(Element::badge_intent("OBB", Intent::Warning));
+            version_row = version_row.child(Element::badge_intent("OBB", Intent::Warning));
         }
     }
 
@@ -207,13 +223,6 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             package.clone(),
         ))
         .child(super::copy_button(package.clone()).visible(!package.is_empty()));
-
-    let version = match (&meta.version_name, meta.version_code) {
-        (Some(n), Some(c)) => format!("{} ({})", n, c),
-        (Some(n), None) => n.clone(),
-        (None, Some(c)) => format!("({})", c),
-        (None, None) => String::new(),
-    };
 
     // 摘要一行只放数字，完整的 Android 版本名放在悬停提示里，免得信息少时也折成两三行。
     let mut summary = vec![format_file_size(info.size)];
@@ -239,22 +248,7 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         .spacing(6)
         .child(name_row)
         .child(package_row)
-        .child(
-            Element::row()
-                .width_match()
-                .cross(Align::Center)
-                .spacing(12)
-                .child(super::with_copy_menu(
-                    Element::label(version.clone())
-                        .font_size(16.0)
-                        .font_weight(500)
-                        .fg_role(Role::Text)
-                        .max_lines(1)
-                        .truncate(Truncate::End),
-                    version,
-                ))
-                .child(badges),
-        )
+        .child(version_row)
         .child(
             Element::label(summary.join("  ·  "))
                 .font_size(12.5)

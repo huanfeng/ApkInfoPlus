@@ -260,7 +260,7 @@ fn build(state: &AppState) -> Element {
 
     let appearance = Element::col()
         .width_match()
-        .spacing(14)
+        .spacing(12)
         .child(Element::card(
             tr!("settings.appearance"),
             Element::col()
@@ -328,7 +328,7 @@ fn build(state: &AppState) -> Element {
     let enable_debug = signal(state.cfg(|c| c.enable_debug));
     let features = Element::col()
         .width_match()
-        .spacing(14)
+        .spacing(12)
         .child(Element::card(
             tr!("settings.features"),
             Element::col()
@@ -426,7 +426,7 @@ fn build(state: &AppState) -> Element {
 
     let tools = Element::col()
         .width_match()
-        .spacing(14)
+        .spacing(12)
         .child(Element::card(
             "adb",
             Element::col()
@@ -672,7 +672,7 @@ fn build(state: &AppState) -> Element {
     // ---- 关于 ----
     let about = Element::col()
         .width_match()
-        .spacing(14)
+        .spacing(12)
         .child(Element::card(
             tr!("settings.about"),
             Element::col()
@@ -760,7 +760,7 @@ fn build(state: &AppState) -> Element {
     let content = Element::scroll().fill().child(
         Element::col()
             .width_match()
-            .padding(20)
+            .padding_edges(Insets::new(12, 12, 12 + super::SCROLL_GUTTER, 12))
             .child(pages(0, appearance))
             .child(pages(1, features))
             .child(pages(2, tools))

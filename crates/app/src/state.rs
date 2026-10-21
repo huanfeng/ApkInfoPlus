@@ -233,6 +233,8 @@ pub struct AppState {
     pub window_title: Signal<String>,
     pub title_width: Signal<i32>,
     pub sidebar_filter: Signal<String>,
+    /// 当前文档换了就加一：侧栏据此把当前那一行滚进视口。
+    pub reveal_active: Signal<u64>,
     /// 左侧文件列表占窗口宽度的比例（分隔条可拖，退出时写回配置）。
     pub sidebar_ratio: Signal<f32>,
 
@@ -275,6 +277,7 @@ impl AppState {
             window_title: signal(String::from(APP_TITLE)),
             title_width: signal(title_width),
             sidebar_filter: signal(String::new()),
+            reveal_active: signal(0),
             sidebar_ratio: signal(sidebar_ratio),
             enable_hash: signal(enable_hash),
             enable_signature: signal(enable_signature),
@@ -320,6 +323,7 @@ impl AppState {
         if self.active_id.get() != id || self.active.with(|v| v.is_empty()) {
             self.active_id.set(id);
             self.active.set(vec![doc]);
+            self.reveal_active.update(|n| *n += 1);
         }
         self.refresh_entries();
     }

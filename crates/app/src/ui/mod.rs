@@ -16,10 +16,12 @@ use crate::state::AppState;
 
 /// 内容区四周留白。
 pub const PAGE_PAD: i32 = 12;
+/// 标签卡片内各页内容的内边距。
+pub const TAB_PAD: i32 = 8;
 /// 卡片之间的间距。
 pub const CARD_GAP: i32 = 12;
 /// 卡片内边距。
-pub const CARD_PAD: i32 = 14;
+pub const CARD_PAD: i32 = 12;
 /// 滚动容器右侧额外留白：windui 的滚动条压在内容之上（约 10px），不让位就会盖住行尾。
 pub const SCROLL_GUTTER: i32 = 10;
 /// 卡片圆角。
@@ -303,11 +305,12 @@ pub fn page(body: Element) -> Element {
     Element::scroll().fill().child(
         Element::col()
             .width_match()
+            // 已在标签卡片里：四周只留一圈窄边，右侧另让出滚动条。
             .padding_edges(Insets::new(
-                PAGE_PAD,
-                CARD_GAP,
-                PAGE_PAD + SCROLL_GUTTER,
-                PAGE_PAD,
+                TAB_PAD,
+                TAB_PAD,
+                TAB_PAD + SCROLL_GUTTER,
+                TAB_PAD,
             ))
             .spacing(CARD_GAP)
             .child(body),
