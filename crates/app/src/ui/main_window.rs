@@ -77,11 +77,16 @@ fn title_bar(_state: &AppState) -> Element {
 }
 
 fn body(state: &AppState) -> Element {
-    let docs = state.docs;
-    let workspace = Element::split_opts(
+    // 侧栏始终在：没打开文件时内容区放拖放提示，导航 / 最近打开 / 设置照常可用。
+    let active = state.active;
+    let content_area = Element::stack()
+        .fill()
+        .child(empty_state(state).visible_when(move || active.with(|v| v.is_empty())))
+        .child(content(state));
+    Element::split_opts(
         Axis::Horizontal,
         sidebar(state),
-        content(state),
+        content_area,
         state.sidebar_ratio,
         SplitOpts {
             thickness: 6,
@@ -90,12 +95,6 @@ fn body(state: &AppState) -> Element {
         },
     )
     .fill()
-    .visible_when(move || docs.with(|v| !v.is_empty()));
-
-    Element::stack()
-        .fill()
-        .child(empty_state(state).visible_when(move || docs.with(|v| v.is_empty())))
-        .child(workspace)
 }
 
 // ---------------------------------------------------------------------------
@@ -259,10 +258,9 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
         .child(placeholder)
         .child(image);
 
-    let mut title_row = Element::row()
-        .width_match()
-        .cross(Align::Center)
-        .spacing(6)
+    let texts = Element::col()
+        .weight(1.0)
+        .spacing(2)
         .child(
             Element::label(title.clone())
                 .font_size(13.5)
@@ -270,15 +268,8 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
                 .fg_role(Role::Text)
                 .max_lines(1)
                 .truncate(Truncate::End)
-                .weight(1.0),
-        );
-    if let Some(i) = &info {
-        title_row = title_row.child(super::kind_badge(i.kind));
-    }
-    let texts = Element::col()
-        .weight(1.0)
-        .spacing(2)
-        .child(title_row)
+                .width_match(),
+        )
         .child(
             Element::label(subtitle.clone())
                 .font_size(12.0)
@@ -288,11 +279,17 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
                 .width_match(),
         );
 
-    let close = icons::button("x", 22, tr!("action.close_file")).on_click({
+    let close = icons::button("x", 20, tr!("action.close_file")).on_click({
         let st = st.clone();
         let d = doc.clone();
         move |ctx| actions::close_doc(&st, ctx, &d)
     });
+    // 右侧：小号格式徽章在上、关闭在下，不再挤占名称那一行。
+    let mut side = Element::col().cross(Align::End).spacing(2);
+    if let Some(i) = &info {
+        side = side.child(super::kind_badge_small(i.kind));
+    }
+    let side = side.child(close);
 
     let mut row = Element::row()
         .width_match()
@@ -309,7 +306,7 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
         })
         .child(icon)
         .child(texts)
-        .child(close);
+        .child(side);
     if entry.active {
         row = row.bg_role_alpha(Role::Accent, 0.12);
     }

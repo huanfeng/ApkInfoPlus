@@ -574,6 +574,19 @@ pub fn show_label_menu(doc: &Rc<Doc>, ctx: &mut EventCtx) {
 /// 概览头右侧「更多」：导出图标三项、复制路径、在文件夹中显示、关闭文件。
 pub fn more_menu_items(state: &AppState, doc: &Rc<Doc>) -> Vec<MenuItem> {
     let mut items = Vec::new();
+    {
+        let st = state.clone();
+        let d = doc.clone();
+        items.push(
+            MenuItem::run(
+                format!("{}\tF5", tr!("action.reparse")),
+                move |ctx| reparse_doc(&st, ctx, &d),
+                false,
+            )
+            .enabled(!doc.parsing.get()),
+        );
+        items.push(MenuItem::separator());
+    }
     let has_icon = doc.icon.with(|v| !v.is_empty());
     let is_vector = current_candidate(doc)
         .map(|c| c.kind == IconKind::XmlVector)

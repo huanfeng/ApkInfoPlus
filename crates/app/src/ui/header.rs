@@ -30,7 +30,8 @@ pub fn build(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
                 .corner(super::CARD_CORNER)
                 .border_role(Role::Border, 1)
                 .child(icon_block(state, doc.clone()))
-                .child(text_block(state, doc.clone(), info.clone()).weight(1.0)),
+                .child(text_block(doc.clone(), info.clone()).weight(1.0))
+                .child(action_block(state, doc)),
         )
 }
 
@@ -121,7 +122,7 @@ fn icon_block(state: &AppState, doc: Rc<Doc>) -> Element {
         .child(nav)
 }
 
-fn text_block(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
+fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     let meta = &info.meta;
 
     // 应用名随语言选择变化：派生信号，读 label_locale 现算。
@@ -156,11 +157,36 @@ fn text_block(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
                 .on_click(move |ctx| actions::show_label_menu(&d, ctx)),
         );
     }
-    // 操作按钮只跟应用名占同一行，右对齐；下面各行用整个宽度，不被挤。
-    name_row = name_row
-        .child(super::kind_badge(info.kind))
-        .child(Element::flex_spacer())
-        .child(action_block(state, doc.clone()));
+    // 格式徽章 + 签名方案（解析完成后出现）+ 分包 / OBB 徽章都跟在应用名后面。
+    // 签名徽章不用 host_signal——它是撑满的 col，放进这一行会把整块文字区撑开。
+    name_row = name_row.child(super::kind_badge(info.kind));
+    let signature = doc.signature;
+    for (scheme, pick) in [
+        (
+            "v1",
+            (|s: &SignatureInfo| s.has_v1) as fn(&SignatureInfo) -> bool,
+        ),
+        ("v2", |s| s.has_v2),
+        ("v3", |s| s.has_v3),
+        ("v3.1", |s| s.has_v31),
+    ] {
+        name_row = name_row.child(
+            Element::badge_intent(
+                format!("{} {}", tr!("tab.signature"), scheme),
+                Intent::Success,
+            )
+            .visible_when(move || signature.with(|v| v.first().is_some_and(|s| pick(s)))),
+        );
+    }
+    if info.is_archive() {
+        name_row = name_row.child(Element::badge_intent(
+            tr!("field.split_badge", count = info.splits.len() as i64),
+            Intent::Primary,
+        ));
+        if !info.obbs.is_empty() {
+            name_row = name_row.child(Element::badge_intent("OBB", Intent::Warning));
+        }
+    }
 
     let package = meta.package_name.clone().unwrap_or_default();
     let package_row = Element::row()
@@ -175,37 +201,6 @@ fn text_block(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             package.clone(),
         ))
         .child(super::copy_button(package.clone()).visible(!package.is_empty()));
-
-    // 徽章行：签名方案（解析完成后出现）、含 OBB、分包数。
-    // 不用 host_signal——它是撑满的 col，放进这一行会把整块文字区撑开。
-    let signature = doc.signature;
-    let mut badges = Element::row().width_match().cross(Align::Center).spacing(6);
-    for (scheme, pick) in [
-        (
-            "v1",
-            (|s: &SignatureInfo| s.has_v1) as fn(&SignatureInfo) -> bool,
-        ),
-        ("v2", |s| s.has_v2),
-        ("v3", |s| s.has_v3),
-        ("v3.1", |s| s.has_v31),
-    ] {
-        badges = badges.child(
-            Element::badge_intent(
-                format!("{} {}", tr!("tab.signature"), scheme),
-                Intent::Success,
-            )
-            .visible_when(move || signature.with(|v| v.first().is_some_and(|s| pick(s)))),
-        );
-    }
-    if info.is_archive() {
-        badges = badges.child(Element::badge_intent(
-            tr!("field.split_badge", count = info.splits.len() as i64),
-            Intent::Primary,
-        ));
-        if !info.obbs.is_empty() {
-            badges = badges.child(Element::badge_intent("OBB", Intent::Warning));
-        }
-    }
 
     let version = match (&meta.version_name, meta.version_code) {
         (Some(n), Some(c)) => format!("{} ({})", n, c),
@@ -230,7 +225,6 @@ fn text_block(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         .spacing(6)
         .child(name_row)
         .child(package_row)
-        .child(badges)
         .child(super::with_copy_menu(
             Element::label(version.clone())
                 .font_size(16.0)
@@ -245,13 +239,13 @@ fn text_block(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         )
 }
 
-/// 右侧动作：安装（主操作）· 重新解析 · 重命名 · 更多。
+/// 右侧动作：纵向一列——安装（主操作）· 重命名 · 更多（重新解析 / 导出 / 路径 / 关闭都在菜单里）。
 fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
     let st = state.clone();
-    let parsing = doc.parsing;
-    Element::row()
-        .cross(Align::Center)
-        .spacing(8)
+    Element::col()
+        .cross(Align::Stretch)
+        .spacing(6)
+        .width(112)
         .child(
             Element::button(t!("action.install"))
                 .icon_content(icons::content("play", icons::ICON_WHITE))
@@ -259,19 +253,6 @@ fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
                 .on_click({
                     let st = st.clone();
                     move |ctx| actions::open_install(&st, ctx)
-                }),
-        )
-        .child(
-            Element::button(t!("action.reparse"))
-                .icon_content(icons::gray("refresh"))
-                .neutral()
-                .outline_soft()
-                .tooltip("F5")
-                .enabled_when(move || !parsing.get())
-                .on_click({
-                    let st = st.clone();
-                    let d = doc.clone();
-                    move |ctx| actions::reparse_doc(&st, ctx, &d)
                 }),
         )
         .child(

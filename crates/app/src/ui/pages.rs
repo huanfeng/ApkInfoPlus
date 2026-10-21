@@ -129,22 +129,20 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             t!("field.application_class"),
             m.application_name.clone().unwrap_or_default(),
         ))
-        .child(field_row(
-            state,
-            t!("field.min_sdk"),
-            sdk_version_text(m.min_sdk_version),
-        ))
-        .child(field_row(
+        .child(sdk_row(state, t!("field.min_sdk"), m.min_sdk_version, None))
+        .child(sdk_row(
             state,
             t!("field.target_sdk"),
-            sdk_version_text(m.target_sdk_version),
+            m.target_sdk_version,
+            None,
         ));
     if m.compile_sdk_version.is_some() {
-        let mut v = sdk_version_text(m.compile_sdk_version);
-        if let Some(c) = &m.compile_sdk_version_codename {
-            v.push_str(&format!(" [{}]", c));
-        }
-        basic = basic.child(field_row(state, t!("field.compile_sdk"), v));
+        basic = basic.child(sdk_row(
+            state,
+            t!("field.compile_sdk"),
+            m.compile_sdk_version,
+            m.compile_sdk_version_codename.as_deref(),
+        ));
     }
     basic = basic.child(field_row(
         state,
@@ -336,6 +334,28 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         col = col.child(section("cpu", CARD_GREEN, tr!("field.features"), feat));
     }
     page(col)
+}
+
+/// SDK 行：只显示数字，鼠标悬停看「Android x (代号)」。
+fn sdk_row(
+    state: &AppState,
+    title: impl Into<TextContent>,
+    sdk: Option<i64>,
+    codename: Option<&str>,
+) -> Element {
+    let Some(v) = sdk else {
+        return field_row(state, title, String::new());
+    };
+    let mut tip = sdk_version_text(Some(v));
+    if let Some(c) = codename {
+        tip.push_str(&format!(" [{}]", c));
+    }
+    field_row_custom(
+        state,
+        title,
+        super::selectable(v.to_string()).tooltip(tip),
+        None,
+    )
 }
 
 /// 概览页的证书摘要：状态文案 + 第一个签名者的几项关键信息。

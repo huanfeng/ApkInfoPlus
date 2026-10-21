@@ -46,17 +46,37 @@ pub fn selectable_signal(text: Signal<String>) -> Element {
         .height(VALUE_H)
 }
 
-/// 文件格式徽章：APK / XAPK / APKM / APKS 各一种固定颜色，侧栏与概览头共用。
-pub fn kind_badge(kind: apkinfo_core::info::ArchiveKind) -> Element {
+/// 文件格式对应的固定颜色：APK 蓝 / XAPK 紫 / APKM 橙 / APKS 绿，侧栏与概览头共用。
+pub fn kind_color(kind: apkinfo_core::info::ArchiveKind) -> Color {
     use apkinfo_core::info::ArchiveKind;
-    let color = match kind {
+    match kind {
         ArchiveKind::Apk => crate::theme::CARD_BLUE,
         ArchiveKind::Xapk => crate::theme::CARD_PURPLE,
         ArchiveKind::Apkm => crate::theme::CARD_ORANGE,
         ArchiveKind::Apks => crate::theme::CARD_GREEN,
         _ => crate::icons::ICON_GRAY,
-    };
-    Element::badge_intent(kind.display_name(), Intent::Custom(color))
+    }
+}
+
+/// 文件格式徽章（概览头用的常规尺寸）。
+pub fn kind_badge(kind: apkinfo_core::info::ArchiveKind) -> Element {
+    Element::badge_intent(kind.display_name(), Intent::Custom(kind_color(kind)))
+}
+
+/// 小号格式徽章（侧栏条目用，挤在关闭按钮上方）。
+pub fn kind_badge_small(kind: apkinfo_core::info::ArchiveKind) -> Element {
+    let color = kind_color(kind);
+    Element::row()
+        .cross(Align::Center)
+        .padding_xy(6, 1)
+        .corner(999.0)
+        .bg(color.scale_alpha(0.15))
+        .child(
+            Element::label(kind.display_name())
+                .font_size(10.0)
+                .font_weight(600)
+                .fg(color),
+        )
 }
 
 /// 子窗口的自绘标题栏（与主窗同一套）：图标 + 标题 + 关闭。macOS 用系统标题栏，原样返回。
