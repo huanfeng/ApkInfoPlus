@@ -1,0 +1,648 @@
+//! 安装对话框：设备列表（多选）+ 高级选项 + 分包勾选 + 进度与取消。
+//!
+//! 安装在后台线程串行执行，进度经 `Msg::Install` 回到 UI 线程更新各设备行的状态信号。
+
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+
+use apkinfo_core::adb::{AdbDevice, InstallOptions};
+use apkinfo_core::info::SplitType;
+use apkinfo_core::installer::{InstallEvent, InstallPhase, InstallRequest};
+use windui::core::EventCtx;
+use windui::prelude::*;
+
+use crate::state::{AppState, Msg};
+
+/// 一台设备在对话框里的一行。
+#[derive(Clone)]
+pub struct DeviceRow {
+    pub device: AdbDevice,
+    pub selected: Signal<bool>,
+    pub phase: Signal<Option<InstallPhase>>,
+    pub message: Signal<String>,
+}
+
+#[derive(Clone)]
+pub struct SplitRow {
+    pub path: String,
+    pub kind: SplitType,
+    pub selected: Signal<bool>,
+}
+
+/// 安装对话框的全部状态，随 `AppState` 一起创建。
+#[derive(Clone)]
+pub struct InstallState {
+    pub devices: Signal<Vec<DeviceRow>>,
+    pub loading_devices: Signal<bool>,
+    pub device_error: Signal<String>,
+    pub installing: Signal<bool>,
+    pub show_advanced: Signal<bool>,
+    pub show_splits: Signal<bool>,
+    pub allow_test: Signal<bool>,
+    pub allow_downgrade: Signal<bool>,
+    pub replace: Signal<bool>,
+    pub grant: Signal<bool>,
+    pub splits: Signal<Vec<SplitRow>>,
+    pub confirm_stop: Signal<bool>,
+    pub cancel: Rc<std::cell::RefCell<Option<Arc<AtomicBool>>>>,
+    pub log: Signal<String>,
+}
+
+impl InstallState {
+    pub fn new(cfg: &crate::config::Config) -> Self {
+        Self {
+            devices: signal(Vec::new()),
+            loading_devices: signal(false),
+            device_error: signal(String::new()),
+            installing: signal(false),
+            show_advanced: signal(false),
+            show_splits: signal(true),
+            allow_test: signal(cfg.install_allow_test),
+            allow_downgrade: signal(cfg.install_allow_downgrade),
+            replace: signal(cfg.install_replace),
+            grant: signal(cfg.install_grant),
+            splits: signal(Vec::new()),
+            confirm_stop: signal(false),
+            cancel: Rc::new(std::cell::RefCell::new(None)),
+            log: signal(String::new()),
+        }
+    }
+}
+
+/// 打开对话框：填充分包行、刷新设备。
+pub fn open(state: &AppState, ctx: &mut EventCtx) {
+    let Some(info) = state.current_info() else {
+        return;
+    };
+    let ins = &state.install;
+    let rows: Vec<SplitRow> = info
+        .splits
+        .iter()
+        .map(|s| SplitRow {
+            path: s.path.clone(),
+            kind: s.kind,
+            selected: signal(true),
+        })
+        .collect();
+    ins.splits.set(rows);
+    ins.log.set(String::new());
+    ins.confirm_stop.set(false);
+    for d in ins.devices.get() {
+        d.phase.set(None);
+        d.message.set(String::new());
+    }
+    state.show_install.set(true);
+    refresh_devices(state, ctx);
+}
+
+pub fn refresh_devices(state: &AppState, ctx: &mut EventCtx) {
+    let ins = &state.install;
+    let Some(adb) = crate::tools::resolve_adb(state) else {
+        ins.device_error.set(tr!("install.no_adb"));
+        ins.devices.set(Vec::new());
+        return;
+    };
+    let _ = ctx;
+    ins.device_error.set(String::new());
+    ins.loading_devices.set(true);
+    let tx = state.tx.clone();
+    thread::spawn(move || {
+        let result = apkinfo_core::adb::list_devices(&adb);
+        let _ = tx.send(Msg::Devices(result));
+    });
+}
+
+pub fn on_devices(state: &AppState, _ctx: &mut EventCtx, result: Result<Vec<AdbDevice>, String>) {
+    let ins = &state.install;
+    ins.loading_devices.set(false);
+    match result {
+        Ok(list) => {
+            // 保留已有行的选中状态与结果（刷新不应清掉刚装完的结果）。
+            let old = ins.devices.get();
+            let rows = list
+                .into_iter()
+                .map(|d| {
+                    if let Some(prev) = old.iter().find(|r| r.device.id == d.id) {
+                        let mut r = prev.clone();
+                        r.device = d;
+                        r
+                    } else {
+                        DeviceRow {
+                            selected: signal(!d.is_offline() && !d.is_unauthorized()),
+                            device: d,
+                            phase: signal(None),
+                            message: signal(String::new()),
+                        }
+                    }
+                })
+                .collect();
+            ins.devices.set(rows);
+            ins.device_error.set(String::new());
+        }
+        Err(e) => {
+            ins.devices.set(Vec::new());
+            ins.device_error.set(e);
+        }
+    }
+}
+
+pub fn on_event(state: &AppState, ctx: &mut EventCtx, ev: InstallEvent) {
+    let ins = &state.install;
+    match ev {
+        InstallEvent::Device {
+            device,
+            phase,
+            message,
+        } => {
+            if let Some(row) = ins
+                .devices
+                .with(|v| v.iter().find(|r| r.device.id == device).cloned())
+            {
+                row.phase.set(Some(phase));
+                row.message.set(message.clone());
+                if phase == InstallPhase::Success {
+                    // 装完自动取消勾选，防止再点一次重复安装。
+                    row.selected.set(false);
+                }
+            }
+            if !message.is_empty() {
+                ins.log.update(|l| {
+                    l.push_str(&format!("[{}] {}\n", device, message));
+                });
+            }
+        }
+        InstallEvent::Log(line) => {
+            ins.log.update(|l| {
+                l.push_str(&line);
+                l.push('\n');
+            });
+        }
+        InstallEvent::Finished { success, failed } => {
+            ins.installing.set(false);
+            *ins.cancel.borrow_mut() = None;
+            if failed == 0 && success > 0 {
+                ctx.toast_ok(tr!("install.success"));
+            } else if failed > 0 {
+                ctx.toast_err(tr!("install.failed"));
+            }
+        }
+    }
+}
+
+fn start_install(state: &AppState, ctx: &mut EventCtx) {
+    let ins = &state.install;
+    let Some(info) = state.current_info() else {
+        return;
+    };
+    let Some(adb) = crate::tools::resolve_adb(state) else {
+        ctx.toast_err(tr!("install.no_adb"));
+        return;
+    };
+    let devices: Vec<String> = ins.devices.with(|v| {
+        v.iter()
+            .filter(|r| r.selected.get() && !r.device.is_offline())
+            .map(|r| r.device.id.clone())
+            .collect()
+    });
+    if devices.is_empty() {
+        ctx.toast_err(tr!("install.no_selection"));
+        return;
+    }
+    let options = InstallOptions {
+        allow_test: ins.allow_test.get(),
+        allow_downgrade: ins.allow_downgrade.get(),
+        replace: ins.replace.get(),
+        grant_permissions: ins.grant.get(),
+    };
+    state.update_config(|c| {
+        c.install_allow_test = options.allow_test;
+        c.install_allow_downgrade = options.allow_downgrade;
+        c.install_replace = options.replace;
+        c.install_grant = options.grant_permissions;
+    });
+    let selected_splits: Option<Vec<String>> = if info.is_archive() {
+        Some(ins.splits.with(|v| {
+            v.iter()
+                .filter(|s| s.selected.get())
+                .map(|s| s.path.clone())
+                .collect()
+        }))
+    } else {
+        None
+    };
+    for id in &devices {
+        if let Some(row) = ins
+            .devices
+            .with(|v| v.iter().find(|r| &r.device.id == id).cloned())
+        {
+            row.phase.set(None);
+            row.message.set(String::new());
+        }
+    }
+    ins.log.set(String::new());
+    ins.installing.set(true);
+    let cancel = Arc::new(AtomicBool::new(false));
+    *ins.cancel.borrow_mut() = Some(cancel.clone());
+
+    let req = InstallRequest {
+        adb,
+        file: info.path.clone(),
+        kind: info.kind,
+        devices,
+        options,
+        selected_splits,
+        package_name: info.meta.package_name.clone(),
+    };
+    let tx = state.tx.clone();
+    thread::spawn(move || {
+        apkinfo_core::installer::run(req, cancel, |ev| {
+            let _ = tx.send(Msg::Install(ev));
+        });
+    });
+}
+
+fn stop_install(state: &AppState) {
+    let ins = &state.install;
+    if let Some(c) = ins.cancel.borrow().as_ref() {
+        c.store(true, Ordering::SeqCst);
+    }
+    ins.confirm_stop.set(false);
+}
+
+// ---------------------------------------------------------------------------
+// 界面
+// ---------------------------------------------------------------------------
+
+pub fn build_dialog(state: &AppState) -> Element {
+    let st = state.clone();
+    let ins = state.install.clone();
+    let show = state.show_install;
+    let installing = ins.installing;
+
+    let body = Element::col()
+        .width_match()
+        .spacing(12)
+        .child(device_section(state))
+        .child(options_section(state))
+        .child(splits_section(state))
+        .child(log_section(state));
+
+    let footer = Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(8)
+        .child(
+            Element::button(t!("action.refresh"))
+                .small()
+                .neutral()
+                .outline()
+                .enabled_when({
+                    let loading = ins.loading_devices;
+                    move || !installing.get() && !loading.get()
+                })
+                .on_click({
+                    let st = st.clone();
+                    move |ctx| refresh_devices(&st, ctx)
+                }),
+        )
+        .child(Element::flex_spacer())
+        .child(
+            Element::button(t!("action.close"))
+                .small()
+                .neutral()
+                .outline()
+                .visible_when(move || !installing.get())
+                .on_click(move |_| show.set(false)),
+        )
+        .child(
+            Element::button(t!("install.stop"))
+                .small()
+                .danger()
+                .outline()
+                .visible_when(move || installing.get())
+                .on_click({
+                    let confirm = ins.confirm_stop;
+                    move |_| confirm.set(true)
+                }),
+        )
+        .child(
+            Element::button(t!("action.install"))
+                .small()
+                .enabled_when({
+                    let devices = ins.devices;
+                    move || {
+                        !installing.get()
+                            && devices.with(|v| {
+                                v.iter().any(|r| r.selected.get() && !r.device.is_offline())
+                            })
+                    }
+                })
+                .on_click({
+                    let st = st.clone();
+                    move |ctx| start_install(&st, ctx)
+                }),
+        );
+
+    let panel = Element::dialog_panel(
+        show,
+        tr!("install.title"),
+        620,
+        move |_ctx| {
+            if !installing.get() {
+                show.set(false);
+            }
+        },
+        Element::scroll().width_match().height(420).child(body),
+        footer,
+    );
+
+    // 停止确认：叠在安装对话框之上的小对话框。
+    let confirm = ins.confirm_stop;
+    let confirm_dialog = Element::dialog(
+        confirm,
+        Element::col()
+            .width(360)
+            .padding(20)
+            .spacing(14)
+            .bg_role(Role::Surface)
+            .corner(12.0)
+            .child(
+                Element::label(t!("install.stop_confirm_title"))
+                    .font_size(16.0)
+                    .font_weight(600)
+                    .fg_role(Role::Text),
+            )
+            .child(
+                Element::label(t!("install.stop_confirm_message"))
+                    .fg_role(Role::TextMuted)
+                    .width_match(),
+            )
+            .child(
+                Element::row()
+                    .width_match()
+                    .spacing(8)
+                    .child(Element::flex_spacer())
+                    .child(
+                        Element::button(t!("action.cancel"))
+                            .small()
+                            .neutral()
+                            .outline()
+                            .on_click(move |_| confirm.set(false)),
+                    )
+                    .child(
+                        Element::button(t!("install.stop"))
+                            .small()
+                            .danger()
+                            .on_click({
+                                let st = st.clone();
+                                move |_| stop_install(&st)
+                            }),
+                    ),
+            ),
+    );
+
+    Element::stack().fill().child(panel).child(confirm_dialog)
+}
+
+fn device_section(state: &AppState) -> Element {
+    let ins = state.install.clone();
+    let loading = ins.loading_devices;
+    let error = ins.device_error;
+    let devices = ins.devices;
+
+    let list = Element::host_signal(devices, |row: DeviceRow| device_row(row)).width_match();
+
+    Element::col()
+        .width_match()
+        .spacing(6)
+        .child(
+            Element::row()
+                .width_match()
+                .cross(Align::Center)
+                .child(
+                    Element::label(t!("install.select_device"))
+                        .font_size(13.5)
+                        .font_weight(600)
+                        .fg_role(Role::Text)
+                        .weight(1.0),
+                )
+                .child(
+                    Element::label(Signal::map(devices, |v| {
+                        tr!("install.device_count", count = v.len() as i64)
+                    }))
+                    .font_size(12.0)
+                    .fg_role(Role::TextMuted),
+                ),
+        )
+        .child(
+            Element::col()
+                .width_match()
+                .bg_role(Role::SurfaceAlt)
+                .corner(8.0)
+                .border_role(Role::Border, 1)
+                .padding(6)
+                .child(
+                    Element::label(t!("install.loading_devices"))
+                        .fg_role(Role::TextMuted)
+                        .padding(8)
+                        .visible_when(move || loading.get()),
+                )
+                .child(
+                    Element::label(error)
+                        .fg_role(Role::Danger)
+                        .padding(8)
+                        .width_match()
+                        .visible_when(move || !loading.get() && error.with(|e| !e.is_empty())),
+                )
+                .child(
+                    Element::label(t!("install.no_devices"))
+                        .fg_role(Role::TextMuted)
+                        .padding(8)
+                        .visible_when(move || {
+                            !loading.get()
+                                && error.with(|e| e.is_empty())
+                                && devices.with(|v| v.is_empty())
+                        }),
+                )
+                .child(list),
+        )
+}
+
+fn device_row(row: DeviceRow) -> Element {
+    let d = &row.device;
+    let offline = d.is_offline();
+    let unauthorized = d.is_unauthorized();
+    let status_text = if offline {
+        tr!("install.offline")
+    } else if unauthorized {
+        tr!("install.unauthorized")
+    } else {
+        tr!("install.online")
+    };
+    let status_badge = if offline || unauthorized {
+        Element::badge_intent(status_text, Intent::Neutral)
+    } else {
+        Element::badge_intent(status_text, Intent::Success)
+    };
+    let phase = row.phase;
+    let message = row.message;
+    let result_text = Signal::map(phase, move |p| match p {
+        None => String::new(),
+        Some(InstallPhase::Installing) => tr!("install.installing"),
+        Some(InstallPhase::PushingObb) => tr!("install.pushing_obb"),
+        Some(InstallPhase::Success) => tr!("install.success"),
+        Some(InstallPhase::Failed) => {
+            let m = message.get();
+            if m.is_empty() {
+                tr!("install.failed")
+            } else {
+                format!("{}: {}", tr!("install.failed"), crate::ui::shorten(&m, 80))
+            }
+        }
+        Some(InstallPhase::Stopped) => tr!("install.stopped"),
+    });
+    let result_role = Signal::map(phase, |p| match p {
+        Some(InstallPhase::Success) => Role::Success,
+        Some(InstallPhase::Failed) => Role::Danger,
+        Some(InstallPhase::Stopped) => Role::Warning,
+        _ => Role::TextMuted,
+    });
+    let subtitle = if d.is_wireless() {
+        String::new()
+    } else {
+        d.id.clone()
+    };
+    Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(10)
+        .padding_xy(6, 4)
+        .child(Element::checkbox("", row.selected).enabled(!offline))
+        .child(
+            Element::col()
+                .weight(1.0)
+                .spacing(2)
+                .child(
+                    Element::row()
+                        .cross(Align::Center)
+                        .spacing(8)
+                        .child(Element::label(d.display_name()).font_size(13.5).fg_role(
+                            if offline {
+                                Role::TextDisabled
+                            } else {
+                                Role::Text
+                            },
+                        ))
+                        .child(status_badge),
+                )
+                .child(
+                    Element::label(subtitle.clone())
+                        .font_size(11.5)
+                        .fg_role(Role::TextSubtle)
+                        .visible(!subtitle.is_empty()),
+                ),
+        )
+        .child(
+            Element::label(result_text)
+                .font_size(12.5)
+                .fg_role_signal(result_role)
+                .max_lines(2)
+                .width(220),
+        )
+}
+
+fn options_section(state: &AppState) -> Element {
+    let ins = state.install.clone();
+    let show = ins.show_advanced;
+    Element::collapsible(
+        tr!("install.advanced_options"),
+        show,
+        Element::col()
+            .width_match()
+            .spacing(4)
+            .padding_xy(8, 4)
+            .child(Element::checkbox(t!("install.force_install"), ins.replace))
+            .child(Element::checkbox(t!("install.allow_test"), ins.allow_test))
+            .child(Element::checkbox(
+                t!("install.allow_downgrade"),
+                ins.allow_downgrade,
+            ))
+            .child(Element::checkbox(
+                t!("install.grant_permissions"),
+                ins.grant,
+            )),
+    )
+    .width_match()
+}
+
+fn splits_section(state: &AppState) -> Element {
+    let ins = state.install.clone();
+    let splits = ins.splits;
+    let show = ins.show_splits;
+
+    let groups = Element::host_signal(splits, move |row: SplitRow| {
+        let is_base = row.kind == SplitType::Base;
+        let kind_key = format!("install.split_type.{}", row.kind.key());
+        Element::row()
+            .width_match()
+            .cross(Align::Center)
+            .spacing(8)
+            .padding_xy(8, 2)
+            .child(Element::checkbox(row.path.clone(), row.selected).enabled(!is_base))
+            .child(Element::flex_spacer())
+            .child(Element::badge_intent(tr!(kind_key), Intent::Neutral))
+    })
+    .width_match();
+
+    let toolbar = Element::row()
+        .width_match()
+        .spacing(8)
+        .padding_xy(8, 2)
+        .child(
+            Element::button(t!("install.select_all"))
+                .small()
+                .neutral()
+                .outline()
+                .on_click(move |_| splits.with(|v| v.iter().for_each(|s| s.selected.set(true)))),
+        )
+        .child(
+            Element::button(t!("install.base_only"))
+                .small()
+                .neutral()
+                .outline()
+                .on_click(move |_| {
+                    splits.with(|v| {
+                        v.iter()
+                            .for_each(|s| s.selected.set(s.kind == SplitType::Base))
+                    })
+                }),
+        );
+
+    Element::collapsible(
+        tr!("install.split_options"),
+        show,
+        Element::col()
+            .width_match()
+            .spacing(4)
+            .child(toolbar)
+            .child(groups),
+    )
+    .width_match()
+    .visible_when(move || splits.with(|v| !v.is_empty()))
+}
+
+fn log_section(state: &AppState) -> Element {
+    let log = state.install.log;
+    Element::col()
+        .width_match()
+        .spacing(4)
+        .child(
+            Element::label(t!("install.log"))
+                .font_size(12.5)
+                .fg_role(Role::TextMuted),
+        )
+        .child(crate::ui::mono_block(log, 110))
+        .visible_when(move || log.with(|l| !l.is_empty()))
+}
