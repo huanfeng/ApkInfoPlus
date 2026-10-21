@@ -1,4 +1,4 @@
-//! 概览头：卡片里放图标 + 应用名 / 包名 / 版本 / 类型徽章 + 摘要，右侧是「安装到设备」。
+//! 概览头：卡片里放图标 + 应用名 / 包名 / 徽章 / 版本 / 摘要，右侧是这份文件的操作按钮。
 
 use std::rc::Rc;
 
@@ -14,19 +14,24 @@ pub const ICON_SIZE: i32 = 96;
 pub fn build(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     Element::col()
         .width_match()
-        .padding_edges(Insets::new(super::PAGE_PAD, 14, super::PAGE_PAD, 0))
+        .padding_edges(Insets::new(
+            super::PAGE_PAD,
+            super::PAGE_PAD,
+            super::PAGE_PAD,
+            0,
+        ))
         .child(
             Element::row()
                 .width_match()
                 .cross(Align::Start)
-                .spacing(18)
-                .padding(16)
+                .spacing(20)
+                .padding(20)
                 .bg_role(Role::Surface)
-                .corner(12.0)
+                .corner(super::CARD_CORNER)
                 .border_role(Role::Border, 1)
                 .child(icon_block(state, doc.clone()))
                 .child(text_block(doc.clone(), info.clone()).weight(1.0))
-                .child(action_block(state)),
+                .child(action_block(state, doc)),
         )
 }
 
@@ -131,18 +136,20 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     });
     let has_alternatives = !info.alternative_labels().is_empty();
 
+    let name_label = super::with_copy_menu(
+        Element::label(label_text)
+            .font_size(24.0)
+            .font_weight(700)
+            .fg_role(Role::Text)
+            .max_lines(1)
+            .truncate(Truncate::End),
+        doc.display_label(),
+    );
     let mut name_row = Element::row()
         .width_match()
         .cross(Align::Center)
-        .spacing(8)
-        .child(
-            Element::label(label_text)
-                .font_size(22.0)
-                .font_weight(700)
-                .fg_role(Role::Text)
-                .max_lines(1)
-                .truncate(Truncate::End),
-        );
+        .spacing(10)
+        .child(name_label);
     if has_alternatives {
         let d = doc.clone();
         name_row = name_row.child(
@@ -152,11 +159,27 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     }
     name_row = name_row.child(Element::badge_intent(
         info.kind.display_name(),
-        Intent::Primary,
+        Intent::Neutral,
     ));
-    // 签名方案徽章：签名解析完成后出现（v1 / v2 / v3 / v3.1）。
+
+    let package = meta.package_name.clone().unwrap_or_default();
+    let package_row = Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(4)
+        .child(super::with_copy_menu(
+            Element::label(package.clone())
+                .font_size(14.0)
+                .fg_role(Role::TextMuted)
+                .font_family(super::mono_family()),
+            package.clone(),
+        ))
+        .child(super::copy_button(package.clone()).visible(!package.is_empty()));
+
+    // 徽章行：签名方案（解析完成后出现）、含 OBB、分包数。
     // 不用 host_signal——它是撑满的 col，放进这一行会把整块文字区撑开。
     let signature = doc.signature;
+    let mut badges = Element::row().width_match().cross(Align::Center).spacing(6);
     for (scheme, pick) in [
         (
             "v1",
@@ -166,7 +189,7 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         ("v3", |s| s.has_v3),
         ("v3.1", |s| s.has_v31),
     ] {
-        name_row = name_row.child(
+        badges = badges.child(
             Element::badge_intent(
                 format!("{} {}", tr!("tab.signature"), scheme),
                 Intent::Success,
@@ -174,8 +197,16 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             .visible_when(move || signature.with(|v| v.first().is_some_and(|s| pick(s)))),
         );
     }
+    if info.is_archive() {
+        badges = badges.child(Element::badge_intent(
+            tr!("field.split_badge", count = info.splits.len() as i64),
+            Intent::Primary,
+        ));
+        if !info.obbs.is_empty() {
+            badges = badges.child(Element::badge_intent("OBB", Intent::Warning));
+        }
+    }
 
-    let package = meta.package_name.clone().unwrap_or_default();
     let version = match (&meta.version_name, meta.version_code) {
         (Some(n), Some(c)) => format!("{} ({})", n, c),
         (Some(n), None) => n.clone(),
@@ -196,25 +227,17 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
 
     Element::col()
         .width_match()
-        .spacing(4)
+        .spacing(6)
         .child(name_row)
-        .child(
-            Element::row()
-                .width_match()
-                .cross(Align::Center)
-                .spacing(6)
-                .child(
-                    Element::label(package.clone())
-                        .font_size(14.0)
-                        .fg_role(Role::TextMuted)
-                        .font_family(super::mono_family()),
-                )
-                .child(
-                    super::copy_button(package)
-                        .visible(!meta.package_name.as_deref().unwrap_or("").is_empty()),
-                ),
-        )
-        .child(Element::label(version).font_size(14.0).fg_role(Role::Text))
+        .child(package_row)
+        .child(badges)
+        .child(super::with_copy_menu(
+            Element::label(version.clone())
+                .font_size(16.0)
+                .font_weight(500)
+                .fg_role(Role::Text),
+            version,
+        ))
         .child(
             Element::label(summary.join("  ·  "))
                 .font_size(12.5)
@@ -222,31 +245,60 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         )
 }
 
-/// 右侧动作：安装到设备（与工具栏同一入口，放在最显眼的位置）+ 目标设备选择。
-fn action_block(state: &AppState) -> Element {
+/// 右侧动作：安装（主操作）· 重新解析 · 重命名 · 更多。
+fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
     let st = state.clone();
-    let selected = state.selected_device;
-    let device_label = Signal::map(selected, |d| match d {
-        Some((_, name)) => name.clone(),
-        None => tr!("install.pick_device"),
-    });
-    Element::col()
+    let parsing = doc.parsing;
+    Element::row()
+        .cross(Align::Center)
         .spacing(8)
-        .cross(Align::Stretch)
         .child(
-            Element::button(t!("install.install_to_device"))
+            Element::button(t!("action.install"))
                 .icon_content(icons::content("play", icons::ICON_WHITE))
+                .tooltip("Ctrl+I")
                 .on_click({
                     let st = st.clone();
                     move |ctx| actions::open_install(&st, ctx)
                 }),
         )
         .child(
-            Element::button(device_label)
-                .icon_content(icons::gray("smartphone"))
+            Element::button(t!("action.reparse"))
+                .icon_content(icons::gray("refresh"))
                 .neutral()
                 .outline()
-                .tooltip(tr!("install.select_device"))
-                .on_click(move |ctx| actions::show_device_menu(&st, ctx)),
+                .tooltip("F5")
+                .enabled_when(move || !parsing.get())
+                .on_click({
+                    let st = st.clone();
+                    let d = doc.clone();
+                    move |ctx| actions::reparse_doc(&st, ctx, &d)
+                }),
+        )
+        .child(
+            Element::button(t!("action.rename"))
+                .icon_content(icons::gray("pencil"))
+                .neutral()
+                .outline()
+                .tooltip("F2")
+                .on_click({
+                    let st = st.clone();
+                    move |ctx| actions::open_rename(&st, ctx)
+                }),
+        )
+        .child(
+            Element::button(t!("action.more"))
+                .icon_content(icons::gray("more"))
+                .neutral()
+                .outline()
+                .on_click({
+                    let st = st.clone();
+                    let d = doc.clone();
+                    move |ctx| {
+                        let items = actions::more_menu_items(&st, &d);
+                        let mut req = windui::event::MenuRequest::below(ctx.bounds(), items);
+                        req.click_through = false;
+                        ctx.show_menu_request(req);
+                    }
+                }),
         )
 }

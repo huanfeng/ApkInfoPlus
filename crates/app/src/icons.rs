@@ -36,6 +36,12 @@ pub fn svg(name: &str) -> &'static [u8] {
         "play" => include_bytes!("../assets/icons/play.svg"),
         "check_circle" => include_bytes!("../assets/icons/check_circle.svg"),
         "cpu" => include_bytes!("../assets/icons/cpu.svg"),
+        "sun" => include_bytes!("../assets/icons/sun.svg"),
+        "moon" => include_bytes!("../assets/icons/moon.svg"),
+        "more" => include_bytes!("../assets/icons/more.svg"),
+        "file" => include_bytes!("../assets/icons/file.svg"),
+        "box" => include_bytes!("../assets/icons/box.svg"),
+        "badge_check" => include_bytes!("../assets/icons/badge_check.svg"),
         _ => include_bytes!("../assets/icons/package.svg"),
     }
 }

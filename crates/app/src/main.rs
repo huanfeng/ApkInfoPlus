@@ -85,6 +85,10 @@ fn main() {
         .theme(theme)
         .locales(locales)
         .icon(app_icon());
+    // 自绘标题栏（Windows / Linux）。macOS 留系统标题栏：红绿灯与全屏手势都靠它。
+    if !cfg!(target_os = "macos") {
+        app = app.frameless();
+    }
 
     let theme_handle = app.theme_handle();
     let locale_handle = app.locale_handle();
@@ -182,13 +186,17 @@ fn main() {
         });
     }
 
-    // 安装进行中不允许关窗。
+    // 安装进行中不允许关窗；放行时顺手把侧栏比例写回配置。
     {
         let st = state.clone();
         app = app.on_close_request(move |ctx| {
             if st.install.installing.get() {
                 ctx.toast(tr!("install.installing"));
                 return false;
+            }
+            let ratio = st.sidebar_ratio.get();
+            if (st.cfg(|c| c.sidebar_ratio) - ratio).abs() > 0.001 {
+                st.update_config(|c| c.sidebar_ratio = ratio);
             }
             true
         });

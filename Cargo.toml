@@ -20,3 +20,8 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
+
+# 开发期直接用本地的 windui 源码（与 WindInput / wind-setting 同一布局：仓库并排放在 ~/develop/windinput）。
+# 库里新加的 API（如 `text_input().frameless()`）发布到 crates.io 后可以去掉这一段。
+[patch.crates-io]
+windui = { path = "../../../windinput/wind-ui-rust" }

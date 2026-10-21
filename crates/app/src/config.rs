@@ -64,6 +64,8 @@ pub struct Config {
     pub download_dir: String,
     pub window_width: i32,
     pub window_height: i32,
+    /// 左侧文件列表占窗口宽度的比例（分隔条可拖）。
+    pub sidebar_ratio: f32,
     /// 上次打开的目录，文件对话框从这里开始。
     pub last_dir: String,
     /// 安装对话框的高级选项，记住上次勾选。
@@ -88,6 +90,7 @@ impl Default for Config {
             download_dir: String::new(),
             window_width: 1180,
             window_height: 760,
+            sidebar_ratio: 0.22,
             last_dir: String::new(),
             install_allow_test: false,
             install_allow_downgrade: false,

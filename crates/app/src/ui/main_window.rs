@@ -1,7 +1,8 @@
-//! 主窗口：工具栏 → [空状态拖放区 | 侧栏文件列表 + 当前文档（概览头 + 标签页）] → 状态栏。
+//! 主窗口：自绘标题栏 → [空状态拖放区 | 侧栏文件列表 ‖ 当前文档（概览头 + 标签页）]。
 //!
 //! 多个文件同时打开：左侧侧栏列出全部，点一下切换；内容区只为当前文档建一棵树
 //! （`host_signal(active)`），切换时重建，各文档自己的信号（选中的标签页、过滤词）保留。
+//! 侧栏与内容区之间是可拖的分隔条，比例存在 `state.sidebar_ratio`，退出时写回配置。
 
 use std::rc::Rc;
 
@@ -13,19 +14,16 @@ use crate::actions;
 use crate::icons;
 use crate::state::{AppState, Doc, DocEntry};
 
-/// 侧栏宽度。
-const SIDEBAR_W: i32 = 272;
+/// 标题栏高度。
+const TITLE_H: i32 = 48;
 
 pub fn build(state: &AppState) -> Element {
     let st = state.clone();
     let root = Element::col()
         .fill()
         .bg_role(Role::Bg)
-        .child(toolbar(state))
-        .child(Element::divider())
+        .child(title_bar(state))
         .child(body(state).weight(1.0))
-        .child(Element::divider())
-        .child(status_bar(state))
         .on_drop_files(move |ctx, paths| {
             actions::open_paths(&st, ctx, paths.to_vec());
         });
@@ -36,146 +34,112 @@ pub fn build(state: &AppState) -> Element {
         .child(rename::build_dialog(state))
 }
 
-fn toolbar(state: &AppState) -> Element {
-    let docs = state.docs;
-    let active = state.active;
+/// 自绘标题栏：logo + 应用名 | 搜索框 | 打开 | … | 设置 · 明暗 | 窗口按钮。
+/// macOS 保留系统标题栏（红绿灯在左上），这一条就只当工具栏用，不放窗口按钮。
+fn title_bar(state: &AppState) -> Element {
     let st = state.clone();
+    let filter = state.sidebar_filter;
+    let docs = state.docs;
 
-    let has_doc = move || active.with(|v| !v.is_empty());
-    let has_info = move || {
-        active.with(|v| {
-            v.first()
-                .map(|d| d.info.with(|i| !i.is_empty()))
-                .unwrap_or(false)
-        })
-    };
-    let parsing = move || active.with(|v| v.first().map(|d| d.parsing.get()).unwrap_or(false));
-
-    let tool = |label: &'static str, icon: &'static str, tip: String| {
-        Element::button(t!(label))
-            .icon_content(icons::gray(icon))
-            .small()
-            .neutral()
-            .outline()
-            .tooltip(tip)
-    };
-    let separator = || {
-        Element::col()
-            .width(1)
-            .height(20)
-            .bg_role(Role::Border)
-            .margin_xy(4, 0)
-    };
-
-    Element::row()
-        .width_match()
+    let left = Element::row()
         .cross(Align::Center)
-        .spacing(8)
-        .padding_xy(12, 8)
-        .bg_role(Role::Surface)
+        .spacing(10)
+        .padding_edges(Insets::new(14, 0, 0, 0))
         .child(
-            Element::button(t!("action.open"))
-                .icon_content(icons::content("folder_open", icons::ICON_WHITE))
+            Element::image_content(ImageContent::from_bytes(include_bytes!(
+                "../../assets/icon.png"
+            )))
+            .size(22, 22),
+        )
+        .child(
+            Element::label(crate::state::APP_TITLE)
+                .font_size(15.0)
+                .font_weight(600)
+                .fg_role(Role::Text),
+        )
+        .child(
+            Element::text_input(filter, t!("sidebar.search"))
+                .width(300)
+                .margin_xy(12, 0)
+                .enabled_when(move || docs.with(|v| !v.is_empty())),
+        )
+        .child(
+            Element::button(t!("action.open_apk"))
+                .icon_content(icons::gray("folder_open"))
                 .small()
+                .neutral()
+                .outline()
                 .tooltip("Ctrl+O")
                 .on_click({
                     let st = st.clone();
                     move |ctx| actions::pick_file(&st, ctx)
                 }),
         )
-        .child(separator())
+        .weight(1.0);
+
+    let dark = state.cfg(|c| crate::theme::is_dark(c, windui::event::system_prefers_dark()));
+    let right = Element::row()
+        .cross(Align::Center)
+        .spacing(2)
+        .padding_edges(Insets::new(0, 0, 6, 0))
         .child(
-            tool("action.reparse", "refresh", "F5".into())
-                .enabled_when(move || has_doc() && !parsing())
-                .on_click({
-                    let st = st.clone();
-                    move |ctx| actions::reparse(&st, ctx)
-                }),
-        )
-        .child(
-            tool("action.install", "smartphone", "Ctrl+I".into())
-                .enabled_when(has_info)
-                .on_click({
-                    let st = st.clone();
-                    move |ctx| actions::open_install(&st, ctx)
-                }),
-        )
-        .child(
-            tool("action.rename", "pencil", "F2".into())
-                .enabled_when(has_info)
-                .on_click({
-                    let st = st.clone();
-                    move |ctx| actions::open_rename(&st, ctx)
-                }),
-        )
-        .child(
-            tool(
-                "action.export_icon",
-                "image_down",
-                tr!("action.export_icon"),
-            )
-            .enabled_when(move || {
-                active.with(|v| {
-                    v.first()
-                        .map(|d| d.icon.with(|i| !i.is_empty()))
-                        .unwrap_or(false)
-                })
-            })
-            .on_click({
+            icons::button("settings", 32, tr!("action.settings")).on_click({
                 let st = st.clone();
-                move |ctx| {
-                    let Some(doc) = st.active_doc() else { return };
-                    let items = actions::icon_menu_items(&st, &doc);
-                    let mut req = windui::event::MenuRequest::below(ctx.bounds(), items);
-                    req.click_through = false;
-                    ctx.show_menu_request(req);
-                }
+                move |ctx| actions::open_settings(&st, ctx)
             }),
         )
-        .child(separator())
         .child(
-            tool("action.close_file", "x", "Ctrl+W".into())
-                .enabled_when(has_doc)
-                .on_click({
-                    let st = st.clone();
-                    move |ctx| actions::close_file(&st, ctx)
-                }),
-        )
-        .child(Element::flex_spacer())
-        .child(
-            Element::label(Signal::map(docs, |v| {
-                if v.len() > 1 {
-                    tr!("sidebar.open_count", count = v.len() as i64)
-                } else {
-                    String::new()
-                }
-            }))
-            .font_size(12.0)
-            .fg_role(Role::TextSubtle),
-        )
-        .child(
-            Element::button(t!("action.settings"))
-                .icon_content(icons::gray("settings"))
-                .small()
-                .neutral()
-                .outline()
-                .tooltip("Ctrl+,")
-                .on_click({
-                    let st = st.clone();
-                    move |ctx| actions::open_settings(&st, ctx)
-                }),
-        )
+            icons::button(
+                if dark { "sun" } else { "moon" },
+                32,
+                tr!("action.toggle_theme"),
+            )
+            .on_click({
+                let st = st.clone();
+                move |_| actions::toggle_theme(&st)
+            }),
+        );
+
+    let mut bar = Element::row()
+        .width_match()
+        .height(TITLE_H)
+        .cross(Align::Stretch)
+        .bg_role(Role::Bg)
+        .window_drag()
+        .child(left)
+        .child(right);
+    if !cfg!(target_os = "macos") {
+        bar = bar
+            .child(
+                Element::col()
+                    .width(1)
+                    .height(18)
+                    .bg_role(Role::Border)
+                    .align(Align::Center)
+                    .margin_xy(6, 0),
+            )
+            .child(Element::window_button(WindowButtonKind::Minimize).fg_role(Role::TextMuted))
+            .child(Element::window_button(WindowButtonKind::Maximize).fg_role(Role::TextMuted))
+            .child(Element::window_button(WindowButtonKind::Close).fg_role(Role::TextMuted));
+    }
+    bar
 }
 
 fn body(state: &AppState) -> Element {
     let docs = state.docs;
-    let workspace = Element::row()
-        .fill()
-        .cross(Align::Stretch)
-        .child(sidebar(state))
-        .child(Element::col().width(1).height_match().bg_role(Role::Border))
-        .child(content(state).weight(1.0))
-        .visible_when(move || docs.with(|v| !v.is_empty()));
+    let workspace = Element::split_opts(
+        Axis::Horizontal,
+        sidebar(state),
+        content(state),
+        state.sidebar_ratio,
+        SplitOpts {
+            thickness: 6,
+            min: 0.14,
+            max: 0.45,
+        },
+    )
+    .fill()
+    .visible_when(move || docs.with(|v| !v.is_empty()));
 
     Element::stack()
         .fill()
@@ -190,26 +154,23 @@ fn body(state: &AppState) -> Element {
 fn sidebar(state: &AppState) -> Element {
     let st = state.clone();
     let docs = state.docs;
-    let filter = state.sidebar_filter;
 
     let head = Element::row()
         .width_match()
         .cross(Align::Center)
-        .padding_edges(Insets::new(14, 12, 10, 6))
+        .padding_edges(Insets::new(16, 12, 12, 4))
         .child(
             Element::label(Signal::map(docs, |v| {
                 tr!("sidebar.title", count = v.len() as i64)
             }))
-            .font_size(13.5)
+            .font_size(13.0)
             .font_weight(600)
-            .fg_role(Role::Text)
+            .fg_role(Role::TextMuted)
             .weight(1.0),
         )
         .child(
-            Element::button(t!("sidebar.close_all"))
-                .small()
-                .neutral()
-                .outline()
+            Element::link(t!("sidebar.close_all"))
+                .font_size(12.5)
                 .enabled_when(move || docs.with(|v| v.len() > 1))
                 .on_click({
                     let st = st.clone();
@@ -217,25 +178,18 @@ fn sidebar(state: &AppState) -> Element {
                 }),
         );
 
-    let search = Element::text_input(filter, t!("sidebar.search"))
-        .width_match()
-        .margin_xy(10, 0);
-
     let list = Element::host_signal(state.entries, {
         let st = st.clone();
         move |e: DocEntry| doc_row(&st, e)
     })
     .width_match()
-    .padding_edges(Insets::new(8, 6, 8, 8))
+    .padding_edges(Insets::new(8, 2, 8, 8))
     .spacing(2);
 
     Element::col()
-        .width(SIDEBAR_W)
         .height_match()
         .bg_role(Role::Surface)
-        .spacing(6)
         .child(head)
-        .child(search)
         .child(Element::scroll().width_match().weight(1.0).child(list))
 }
 
@@ -243,28 +197,52 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
     let doc = entry.doc.clone();
     let st = state.clone();
     let filter = state.sidebar_filter;
-    let name = doc.file_name();
+    let file_name = doc.file_name();
+    // 解析完显示应用名 + 版本，解析中 / 失败显示文件名 + 状态。
+    let info = doc.current_info();
+    let (title, subtitle) = match &info {
+        Some(i) => {
+            let label = doc.display_label();
+            let name = if label.trim().is_empty() {
+                file_name.clone()
+            } else {
+                label
+            };
+            let version = match (&i.meta.version_name, i.meta.version_code) {
+                (Some(n), Some(c)) => format!("{} ({})", n, c),
+                (Some(n), None) => n.clone(),
+                (None, Some(c)) => c.to_string(),
+                (None, None) => i.meta.package_name.clone().unwrap_or_default(),
+            };
+            (name, version)
+        }
+        None => (file_name.clone(), doc.subtitle.get()),
+    };
+    let package = info
+        .as_ref()
+        .and_then(|i| i.meta.package_name.clone())
+        .unwrap_or_default();
 
     // 图标：有就画位图，没有（解析中 / 失败）用包图标占位。
     let icon_sig = doc.icon;
     let image = Element::host_signal(doc.icon, |img: Rc<apkinfo_core::icon::RgbaImage>| {
         Element::image_rgba(img.width, img.height, &img.data)
             .fit(Fit::Contain)
-            .size(36, 36)
-            .corner(8.0)
+            .size(40, 40)
+            .corner(10.0)
     });
     let placeholder = Element::stack()
-        .size(36, 36)
-        .corner(8.0)
+        .size(40, 40)
+        .corner(10.0)
         .bg_role(Role::SurfaceAlt)
         .child(
             Element::image_content(icons::gray("package"))
-                .size(18, 18)
+                .size(20, 20)
                 .align_xy(Align::Center, Align::Center),
         )
         .visible_when(move || icon_sig.with(|v| v.is_empty()));
     let icon = Element::stack()
-        .size(36, 36)
+        .size(40, 40)
         .child(placeholder)
         .child(image);
 
@@ -272,17 +250,17 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
         .weight(1.0)
         .spacing(2)
         .child(
-            Element::label(name.clone())
-                .font_size(13.0)
-                .font_weight(if entry.active { 600 } else { 400 })
+            Element::label(title.clone())
+                .font_size(13.5)
+                .font_weight(600)
                 .fg_role(Role::Text)
                 .max_lines(1)
-                .truncate(Truncate::Middle)
+                .truncate(Truncate::End)
                 .width_match(),
         )
         .child(
-            Element::label(doc.subtitle)
-                .font_size(11.5)
+            Element::label(subtitle.clone())
+                .font_size(12.0)
                 .fg_role(Role::TextMuted)
                 .max_lines(1)
                 .truncate(Truncate::End)
@@ -299,9 +277,10 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
         .width_match()
         .cross(Align::Center)
         .spacing(10)
-        .padding_edges(Insets::new(8, 6, 4, 6))
-        .corner(8.0)
+        .padding_edges(Insets::new(8, 7, 4, 7))
+        .corner(10.0)
         .clickable()
+        .tooltip(file_name.clone())
         .on_click({
             let st = st.clone();
             let id = doc.id;
@@ -313,14 +292,11 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
     if entry.active {
         row = row.bg_role_alpha(Role::Accent, 0.12);
     }
-    let name_lower = name.to_lowercase();
-    let subtitle = doc.subtitle;
+    let hay = format!("{}\n{}\n{}\n{}", title, subtitle, file_name, package).to_lowercase();
     row.visible_when(move || {
         filter.with(|f| {
             let f = f.trim().to_lowercase();
-            f.is_empty()
-                || name_lower.contains(&f)
-                || subtitle.with(|s| s.to_lowercase().contains(&f))
+            f.is_empty() || hay.contains(&f)
         })
     })
 }
@@ -404,12 +380,12 @@ fn pending_panel(state: &AppState, doc: Rc<Doc>) -> Element {
 /// 没打开文件时的大拖放区。
 fn empty_state(state: &AppState) -> Element {
     let st = state.clone();
-    Element::col().fill().padding(40).child(
+    Element::col().fill().padding(super::PAGE_PAD).child(
         Element::col()
             .fill()
             .cross(Align::Center)
             .spacing(10)
-            .corner(16.0)
+            .corner(super::CARD_CORNER)
             .border_role(Role::Border, 2)
             .bg_role_alpha(Role::Accent, 0.04)
             .clickable()
@@ -437,44 +413,4 @@ fn empty_state(state: &AppState) -> Element {
             )
             .child(Element::flex_spacer()),
     )
-}
-
-fn status_bar(state: &AppState) -> Element {
-    let st = state.clone();
-    let active = state.active;
-    let path_text = Signal::map(active, |v| match v.first() {
-        Some(d) => d.path.with(|p| p.display().to_string()),
-        None => tr!("status.ready"),
-    });
-    let has_doc = move || active.with(|v| !v.is_empty());
-    Element::row()
-        .width_match()
-        .cross(Align::Center)
-        .spacing(6)
-        .padding_xy(12, 4)
-        .bg_role(Role::Surface)
-        .child(
-            Element::label(path_text)
-                .font_size(12.0)
-                .fg_role(Role::TextMuted)
-                .max_lines(1)
-                .truncate(Truncate::Middle)
-                .weight(1.0),
-        )
-        .child(
-            icons::button("copy", 22, tr!("action.copy_path"))
-                .visible_when(has_doc)
-                .on_click({
-                    let st = st.clone();
-                    move |ctx| actions::copy_path(&st, ctx)
-                }),
-        )
-        .child(
-            icons::button("folder", 22, tr!("action.open_dir"))
-                .visible_when(has_doc)
-                .on_click({
-                    let st = st.clone();
-                    move |ctx| actions::open_in_file_manager(&st, ctx)
-                }),
-        )
 }

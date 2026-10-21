@@ -1,6 +1,6 @@
 //! 界面组装。每个子模块导出一个 `build_*` 函数，返回 `Element`。
 //!
-//! 共用的小部件（字段行、分区卡片、复制按钮）放在这里，保证各页视觉一致。
+//! 共用的小部件（字段行、带图标的分区卡片、可选中文本、复制按钮）放在这里，保证各页视觉一致。
 
 pub mod header;
 pub mod install;
@@ -10,59 +10,132 @@ pub mod rename;
 pub mod settings;
 
 use windui::prelude::*;
+use windui::ui::inputs::TextInput;
 
 use crate::state::AppState;
 
-/// 内容区左右留白。
-pub const PAGE_PAD: i32 = 20;
+/// 内容区四周留白。
+pub const PAGE_PAD: i32 = 16;
+/// 卡片之间的间距。
+pub const CARD_GAP: i32 = 12;
+/// 卡片内边距。
+pub const CARD_PAD: i32 = 16;
 /// 滚动容器右侧额外留白：windui 的滚动条压在内容之上（约 10px），不让位就会盖住行尾。
 pub const SCROLL_GUTTER: i32 = 10;
+/// 卡片圆角。
+pub const CARD_CORNER: f32 = 12.0;
 
-/// 「标题 | 值 | 复制」一行。值为空时显示占位。
+/// 可选中、可复制的单行文本：无框只读输入框。过长时随光标横向滚动，不撑破布局；
+/// 右键有内建的复制菜单。
+pub fn selectable(text: impl Into<String>) -> Element {
+    selectable_signal(signal(text.into()))
+}
+
+/// 单行字段值的高度：与纯 label 行对齐（label 约 18px + 上下各 3px）。
+pub const VALUE_H: i32 = 24;
+
+pub fn selectable_signal(text: Signal<String>) -> Element {
+    Element::text_input(text, "")
+        .read_only()
+        .frameless()
+        .font_size(13.0)
+        .fg_role(Role::Text)
+        .width_match()
+        .height(VALUE_H)
+}
+
+/// 多行版本：`lines` 为显示行数（内容更多时可滚动）。
+pub fn selectable_lines(text: impl Into<String>, lines: usize) -> Element {
+    let mut ti = TextInput::new(signal(text.into()), "");
+    {
+        let c = ti.config_mut();
+        c.read_only = true;
+        c.frameless = true;
+        c.multiline = true;
+        c.wrap = true;
+    }
+    // 每行约 20px，外加输入框自己的上下内边距。
+    Element::leaf()
+        .widget(ti)
+        .font_size(13.0)
+        .fg_role(Role::Text)
+        .width_match()
+        .height((lines.max(1) as i32) * 20 + 14)
+}
+
+/// 非输入框的字段值（占位、徽章行、纯 label）：补上与无框输入框内边距等宽的左边距，
+/// 让各行的值从同一条竖线起笔。
+pub fn plain_value(el: Element) -> Element {
+    Element::row()
+        .cross(Align::Center)
+        .padding_edges(Insets::new(VALUE_PAD_X, 0, 0, 0))
+        .child(el)
+}
+
+/// 无框输入框的文字相对控件左缘的内边距。
+pub const VALUE_PAD_X: i32 = 10;
+
+/// 给任意元素挂一个「复制」右键菜单（标题、徽章这类不是输入框的文本）。
+pub fn with_copy_menu(el: Element, text: String) -> Element {
+    el.on_context_menu(move || {
+        let t = text.clone();
+        vec![windui::event::MenuItem::run(
+            tr!("action.copy"),
+            move |ctx| {
+                ctx.clipboard_set(&t);
+                ctx.toast_ok(tr!("action.copied", content = shorten(&t, 60)));
+            },
+            false,
+        )]
+    })
+}
+
+/// 「标题 | 值」一行，值可选中复制；空值显示占位。
 pub fn field_row(
     state: &AppState,
     title: impl Into<TextContent>,
     value: impl Into<String>,
 ) -> Element {
     let value: String = value.into();
-    field_row_with(state, title, value, true)
+    if value.is_empty() {
+        return field_row_custom(
+            state,
+            title,
+            plain_value(
+                Element::label(t!("field.none"))
+                    .font_size(13.0)
+                    .fg_role(Role::TextSubtle)
+                    .height(VALUE_H),
+            ),
+            None,
+        );
+    }
+    let lines = value.lines().count();
+    let body = if lines > 1 {
+        selectable_lines(value, lines.min(6))
+    } else {
+        selectable(value)
+    };
+    field_row_custom(state, title, body, None)
 }
 
-pub fn field_row_with(
+/// 同 [`field_row`]，行尾多一个复制按钮（包名、路径这类最常复制的字段）。
+pub fn field_row_copy(
     state: &AppState,
     title: impl Into<TextContent>,
-    value: String,
-    copyable: bool,
+    value: impl Into<String>,
 ) -> Element {
-    let width = state.title_width.get();
-    let display = if value.is_empty() {
-        tr!("field.none")
-    } else {
-        value.clone()
-    };
-    let mut row =
-        Element::row()
-            .width_match()
-            .cross(Align::Start)
-            .spacing(12)
-            .padding_xy(0, 5)
-            .child(
-                Element::label(title)
-                    .width(width)
-                    .font_size(13.0)
-                    .fg_role(Role::TextMuted),
-            )
-            .child(Element::label(display).weight(1.0).font_size(13.0).fg_role(
-                if value.is_empty() {
-                    Role::TextSubtle
-                } else {
-                    Role::Text
-                },
-            ));
-    if copyable && !value.is_empty() {
-        row = row.child(copy_button(value));
+    let value: String = value.into();
+    if value.is_empty() {
+        return field_row(state, title, value);
     }
-    row
+    let lines = value.lines().count();
+    let body = if lines > 1 {
+        selectable_lines(value.clone(), lines.min(6))
+    } else {
+        selectable(value.clone())
+    };
+    field_row_custom(state, title, body, Some(value))
 }
 
 /// 「标题 | 任意元素 | （可选）复制」一行。
@@ -76,8 +149,8 @@ pub fn field_row_custom(
     let mut row = Element::row()
         .width_match()
         .cross(Align::Center)
-        .spacing(12)
-        .padding_xy(0, 5)
+        .spacing(10)
+        .padding_xy(0, 3)
         .child(
             Element::label(title)
                 .width(width)
@@ -99,37 +172,55 @@ pub fn copy_button(value: String) -> Element {
     })
 }
 
-/// 分区卡片：标题 + 分隔线 + 内容。
-pub fn section(title: impl Into<String>, body: Element) -> Element {
-    Element::card(title, body).width_match()
+/// 卡片标题前的小图标：淡色圆角方块 + 语义色线条图标。
+pub fn card_icon(name: &str, color: Color) -> Element {
+    Element::stack()
+        .size(28, 28)
+        .corner(8.0)
+        .bg(color.scale_alpha(0.12))
+        .child(
+            Element::image_content(crate::icons::content(name, color))
+                .size(16, 16)
+                .align_xy(Align::Center, Align::Center),
+        )
 }
 
-/// 分区卡片，标题旁可放一个操作（如「复制全部」）。
+/// 分区卡片：图标 + 标题 + 内容。
+pub fn section(icon: &str, color: Color, title: impl Into<TextContent>, body: Element) -> Element {
+    section_with_action(icon, color, title, None, body)
+}
+
+/// 分区卡片，标题行右侧可放一个动作（「复制全部」/「查看详情」）。
 pub fn section_with_action(
+    icon: &str,
+    color: Color,
     title: impl Into<TextContent>,
-    action: Element,
+    action: Option<Element>,
     body: Element,
 ) -> Element {
+    let mut head = Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(10)
+        .child(card_icon(icon, color))
+        .child(
+            Element::label(title)
+                .font_size(15.0)
+                .font_weight(600)
+                .fg_role(Role::Text)
+                .weight(1.0),
+        );
+    if let Some(a) = action {
+        head = head.child(a);
+    }
     Element::col()
         .width_match()
         .bg_role(Role::Surface)
-        .corner(10.0)
+        .corner(CARD_CORNER)
         .border_role(Role::Border, 1)
-        .padding(16)
-        .spacing(10)
-        .child(
-            Element::row()
-                .width_match()
-                .cross(Align::Center)
-                .child(
-                    Element::label(title)
-                        .font_size(14.0)
-                        .font_weight(600)
-                        .fg_role(Role::Text)
-                        .weight(1.0),
-                )
-                .child(action),
-        )
+        .padding(CARD_PAD)
+        .spacing(8)
+        .child(head)
         .child(Element::divider())
         .child(body)
 }
@@ -141,11 +232,11 @@ pub fn page(body: Element) -> Element {
             .width_match()
             .padding_edges(Insets::new(
                 PAGE_PAD,
-                14,
+                CARD_GAP,
                 PAGE_PAD + SCROLL_GUTTER,
                 PAGE_PAD,
             ))
-            .spacing(14)
+            .spacing(CARD_GAP)
             .child(body),
     )
 }

@@ -30,6 +30,7 @@ pub struct DeviceRow {
 pub struct SplitRow {
     pub path: String,
     pub kind: SplitType,
+    pub size: u64,
     pub selected: Signal<bool>,
 }
 
@@ -122,6 +123,7 @@ pub fn open(state: &AppState, ctx: &mut EventCtx) {
             .map(|s| SplitRow {
                 path: s.path.clone(),
                 kind: s.kind,
+                size: s.size,
                 selected: signal(true),
             })
             .collect()
@@ -199,17 +201,11 @@ pub fn on_devices(state: &AppState, _ctx: &mut EventCtx, result: Result<Vec<AdbD
             ins.devices.set(Vec::new());
             let mut scope = ins.device_scope.borrow_mut();
             scope.dispose();
-            let preferred = state.selected_device.get().map(|(id, _)| id);
             let rows = scope.collect(|| {
                 list.into_iter()
                     .map(|d| {
                         let prev = old.iter().find(|(id, ..)| *id == d.id);
-                        let usable = !d.is_offline() && !d.is_unauthorized();
-                        // 概览头指定了目标设备就只勾它；没指定则勾全部可用的。
-                        let default_sel = match &preferred {
-                            Some(p) => usable && *p == d.id,
-                            None => usable,
-                        };
+                        let default_sel = !d.is_offline() && !d.is_unauthorized();
                         DeviceRow {
                             selected: signal(prev.map(|p| p.1).unwrap_or(default_sel)),
                             phase: signal(prev.and_then(|p| p.2)),
@@ -388,10 +384,10 @@ fn build_window(state: &AppState) -> Element {
     // 右侧多留滚动条的位置：滚动条压在内容之上，不留白就会盖住行尾的徽章。
     let body = Element::col()
         .width_match()
-        .spacing(12)
+        .spacing(super::CARD_GAP)
         .padding_edges(Insets::new(
             super::PAGE_PAD,
-            6,
+            4,
             super::PAGE_PAD + super::SCROLL_GUTTER,
             super::PAGE_PAD,
         ))
@@ -525,60 +521,42 @@ fn device_section(state: &AppState) -> Element {
 
     let list = Element::host_signal(devices, |row: DeviceRow| device_row(row)).width_match();
 
-    Element::col()
-        .width_match()
-        .spacing(6)
-        .child(
-            Element::row()
-                .width_match()
-                .cross(Align::Center)
-                .child(
-                    Element::label(t!("install.select_device"))
-                        .font_size(13.5)
-                        .font_weight(600)
-                        .fg_role(Role::Text)
-                        .weight(1.0),
-                )
-                .child(
-                    Element::label(Signal::map(devices, |v| {
-                        tr!("install.device_count", count = v.len() as i64)
-                    }))
-                    .font_size(12.0)
-                    .fg_role(Role::TextMuted),
-                ),
-        )
-        .child(
-            Element::col()
-                .width_match()
-                .bg_role(Role::SurfaceAlt)
-                .corner(8.0)
-                .border_role(Role::Border, 1)
-                .padding(6)
-                .child(
-                    Element::label(t!("install.loading_devices"))
-                        .fg_role(Role::TextMuted)
-                        .padding(8)
-                        .visible_when(move || loading.get()),
-                )
-                .child(
-                    Element::label(error)
-                        .fg_role(Role::Danger)
-                        .padding(8)
-                        .width_match()
-                        .visible_when(move || !loading.get() && error.with(|e| !e.is_empty())),
-                )
-                .child(
-                    Element::label(t!("install.no_devices"))
-                        .fg_role(Role::TextMuted)
-                        .padding(8)
-                        .visible_when(move || {
-                            !loading.get()
-                                && error.with(|e| e.is_empty())
-                                && devices.with(|v| v.is_empty())
-                        }),
-                )
-                .child(list),
-        )
+    let count = Element::label(Signal::map(devices, |v| {
+        tr!("install.device_count", count = v.len() as i64)
+    }))
+    .font_size(12.0)
+    .fg_role(Role::TextMuted);
+    step_card(
+        1,
+        tr!("install.select_device"),
+        Some(count),
+        Element::col()
+            .width_match()
+            .child(
+                Element::label(t!("install.loading_devices"))
+                    .fg_role(Role::TextMuted)
+                    .padding(8)
+                    .visible_when(move || loading.get()),
+            )
+            .child(
+                Element::label(error)
+                    .fg_role(Role::Danger)
+                    .padding(8)
+                    .width_match()
+                    .visible_when(move || !loading.get() && error.with(|e| !e.is_empty())),
+            )
+            .child(
+                Element::label(t!("install.no_devices"))
+                    .fg_role(Role::TextMuted)
+                    .padding(8)
+                    .visible_when(move || {
+                        !loading.get()
+                            && error.with(|e| e.is_empty())
+                            && devices.with(|v| v.is_empty())
+                    }),
+            )
+            .child(list),
+    )
 }
 
 fn device_row(row: DeviceRow) -> Element {
@@ -667,25 +645,33 @@ fn device_row(row: DeviceRow) -> Element {
 fn options_section(state: &AppState) -> Element {
     let ins = state.install.clone();
     let show = ins.show_advanced;
-    Element::collapsible(
-        tr!("install.advanced_options"),
-        show,
-        Element::col()
-            .width_match()
-            .spacing(4)
-            .padding_xy(8, 4)
-            .child(Element::checkbox(t!("install.force_install"), ins.replace))
-            .child(Element::checkbox(t!("install.allow_test"), ins.allow_test))
-            .child(Element::checkbox(
-                t!("install.allow_downgrade"),
-                ins.allow_downgrade,
-            ))
-            .child(Element::checkbox(
-                t!("install.grant_permissions"),
-                ins.grant,
-            )),
-    )
-    .width_match()
+    Element::col()
+        .width_match()
+        .bg_role(Role::Surface)
+        .corner(super::CARD_CORNER)
+        .border_role(Role::Border, 1)
+        .padding_xy(4, 0)
+        .child(
+            Element::collapsible(
+                tr!("install.advanced_options"),
+                show,
+                Element::col()
+                    .width_match()
+                    .spacing(4)
+                    .padding_xy(8, 4)
+                    .child(Element::checkbox(t!("install.force_install"), ins.replace))
+                    .child(Element::checkbox(t!("install.allow_test"), ins.allow_test))
+                    .child(Element::checkbox(
+                        t!("install.allow_downgrade"),
+                        ins.allow_downgrade,
+                    ))
+                    .child(Element::checkbox(
+                        t!("install.grant_permissions"),
+                        ins.grant,
+                    )),
+            )
+            .width_match(),
+        )
 }
 
 fn splits_section(state: &AppState) -> Element {
@@ -700,9 +686,16 @@ fn splits_section(state: &AppState) -> Element {
             .width_match()
             .cross(Align::Center)
             .spacing(8)
-            .padding_xy(8, 2)
+            .padding_xy(4, 1)
             .child(Element::checkbox(row.path.clone(), row.selected).enabled(!is_base))
             .child(Element::flex_spacer())
+            .child(
+                Element::label(apkinfo_core::info::format_file_size(row.size))
+                    .font_size(12.0)
+                    .fg_role(Role::TextMuted)
+                    .width(72)
+                    .text_align(Align::End),
+            )
             .child(Element::badge_intent(tr!(kind_key), Intent::Neutral))
     })
     .width_match();
@@ -710,7 +703,7 @@ fn splits_section(state: &AppState) -> Element {
     let toolbar = Element::row()
         .width_match()
         .spacing(8)
-        .padding_xy(8, 2)
+        .padding_xy(4, 2)
         .child(
             Element::button(t!("install.select_all"))
                 .small()
@@ -733,19 +726,72 @@ fn splits_section(state: &AppState) -> Element {
                         s.selected.set(s.kind == SplitType::Base);
                     }
                 }),
+        )
+        .child(
+            Element::button(t!("install.base_and_language"))
+                .small()
+                .neutral()
+                .outline()
+                .on_click(move |_| {
+                    for s in splits.get() {
+                        s.selected
+                            .set(matches!(s.kind, SplitType::Base | SplitType::Language));
+                    }
+                }),
         );
 
-    Element::collapsible(
+    let _ = show;
+    step_card(
+        2,
         tr!("install.split_options"),
-        show,
+        None,
         Element::col()
             .width_match()
             .spacing(4)
             .child(toolbar)
             .child(groups),
     )
-    .width_match()
     .visible_when(move || splits.with(|v| !v.is_empty()))
+}
+
+/// 步骤卡片：圆形序号 + 标题（+ 右侧动作）+ 内容。
+fn step_card(n: u32, title: String, action: Option<Element>, body: Element) -> Element {
+    let mut head = Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(8)
+        .child(
+            Element::stack()
+                .size(20, 20)
+                .corner(10.0)
+                .bg_role(Role::Accent)
+                .child(
+                    Element::label(n.to_string())
+                        .font_size(11.0)
+                        .font_weight(700)
+                        .fg_role(Role::OnAccent)
+                        .align_xy(Align::Center, Align::Center),
+                ),
+        )
+        .child(
+            Element::label(title)
+                .font_size(13.5)
+                .font_weight(600)
+                .fg_role(Role::Text)
+                .weight(1.0),
+        );
+    if let Some(a) = action {
+        head = head.child(a);
+    }
+    Element::col()
+        .width_match()
+        .bg_role(Role::Surface)
+        .corner(super::CARD_CORNER)
+        .border_role(Role::Border, 1)
+        .padding(12)
+        .spacing(8)
+        .child(head)
+        .child(body)
 }
 
 fn log_section(state: &AppState) -> Element {
@@ -756,6 +802,7 @@ fn log_section(state: &AppState) -> Element {
         .child(
             Element::label(t!("install.log"))
                 .font_size(12.5)
+                .font_weight(600)
                 .fg_role(Role::TextMuted),
         )
         .child(crate::ui::mono_block(log, 110))
