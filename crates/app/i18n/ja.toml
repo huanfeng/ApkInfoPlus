@@ -205,6 +205,12 @@ unknown = "その他"
 
 [settings]
 title = "設定"
+renderer = "レンダラー"
+renderer_auto = "自動"
+renderer_software = "ソフトウェア"
+renderer_gpu = "GPU"
+renderer_hint = "自動：GPU 優先、不可ならソフトウェア。再起動で反映"
+restart_required = "再起動後に有効"
 appearance = "外観"
 features = "機能"
 tools = "ツール"

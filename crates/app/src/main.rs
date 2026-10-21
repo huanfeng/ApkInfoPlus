@@ -89,6 +89,11 @@ fn main() {
     if !cfg!(target_os = "macos") {
         app = app.frameless();
     }
+    app = app.renderer(match cfg.renderer {
+        config::RendererMode::Auto => Renderer::Auto,
+        config::RendererMode::Software => Renderer::Software,
+        config::RendererMode::Gpu => Renderer::Gpu,
+    });
 
     let theme_handle = app.theme_handle();
     let locale_handle = app.locale_handle();

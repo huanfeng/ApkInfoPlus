@@ -206,6 +206,12 @@ unknown = "其他"
 
 [settings]
 title = "設定"
+renderer = "渲染後端"
+renderer_auto = "自動"
+renderer_software = "軟體"
+renderer_gpu = "GPU"
+renderer_hint = "自動：優先 GPU，不可用時回退軟體；重啟後生效"
+restart_required = "重新啟動後生效"
 appearance = "外觀"
 features = "功能"
 tools = "工具"

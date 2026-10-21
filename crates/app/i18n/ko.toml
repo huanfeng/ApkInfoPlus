@@ -205,6 +205,12 @@ unknown = "기타"
 
 [settings]
 title = "설정"
+renderer = "렌더러"
+renderer_auto = "자동"
+renderer_software = "소프트웨어"
+renderer_gpu = "GPU"
+renderer_hint = "자동: GPU 우선, 불가 시 소프트웨어. 재시작 후 적용"
+restart_required = "재시작 후 적용"
 appearance = "모양"
 features = "기능"
 tools = "도구"

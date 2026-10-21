@@ -23,6 +23,7 @@ pub fn build(state: &AppState) -> Element {
         .fill()
         .bg_role(Role::Bg)
         .child(title_bar(state))
+        .child(Element::divider())
         .child(body(state).weight(1.0))
         .on_drop_files(move |ctx, paths| {
             actions::open_paths(&st, ctx, paths.to_vec());
@@ -64,7 +65,8 @@ fn title_bar(_state: &AppState) -> Element {
         .width_match()
         .height(TITLE_H)
         .cross(Align::Stretch)
-        .bg_role(Role::Bg)
+        // 标题栏用卡片白、正文用浅灰底，中间一条分隔线，层级一眼可分。
+        .bg_role(Role::Surface)
         .window_drag()
         .child(left);
     if !cfg!(target_os = "macos") {
@@ -112,12 +114,12 @@ fn sidebar(state: &AppState) -> Element {
         .padding_edges(Insets::new(8, 8, 8, 4))
         .spacing(2)
         .child(
-            nav_item("folder_open", t!("sidebar.open_file"), Some("Ctrl+O")).on_click({
+            nav_item("folder_open", tr!("sidebar.open_file"), Some("Ctrl+O")).on_click({
                 let st = st.clone();
                 move |ctx| actions::pick_file(&st, ctx)
             }),
         )
-        .child(nav_item("history", t!("sidebar.recent"), None).on_click({
+        .child(nav_item("history", tr!("sidebar.recent"), None).on_click({
             let st = st.clone();
             move |ctx| {
                 let items = actions::recent_menu_items(&st);
@@ -127,7 +129,7 @@ fn sidebar(state: &AppState) -> Element {
             }
         }))
         .child(
-            nav_item("settings", t!("action.settings"), Some("Ctrl+,")).on_click({
+            nav_item("settings", tr!("action.settings"), Some("Ctrl+,")).on_click({
                 let st = st.clone();
                 move |ctx| actions::open_settings(&st, ctx)
             }),
@@ -168,41 +170,50 @@ fn sidebar(state: &AppState) -> Element {
         .width_match()
         .margin_xy(10, 8);
 
-    Element::col()
-        .height_match()
+    // 与右侧一样是一张卡片：同样的圆角、描边与外边距，两栏风格统一。
+    let card = Element::col()
+        .fill()
         .bg_role(Role::Surface)
+        .corner(super::CARD_CORNER)
+        .border_role(Role::Border, 1)
         .child(nav)
         .child(Element::divider().margin_xy(12, 2))
         .child(head)
         .child(Element::scroll().width_match().weight(1.0).child(list))
         .child(Element::divider().margin_xy(12, 0))
-        .child(search)
+        .child(search);
+    Element::col()
+        .height_match()
+        .padding_edges(Insets::new(
+            super::PAGE_PAD,
+            super::PAGE_PAD,
+            0,
+            super::PAGE_PAD,
+        ))
+        .child(card)
 }
 
-/// 侧栏导航项：图标 + 文字的扁平行。
-fn nav_item(icon: &str, label: impl Into<TextContent>, shortcut: Option<&str>) -> Element {
-    let mut row = Element::row()
+/// 侧栏导航项：图标 + 文字的扁平行；快捷键只在悬停提示里出现，不占行宽。
+fn nav_item(icon: &str, label: String, shortcut: Option<&str>) -> Element {
+    let tip = match shortcut {
+        Some(k) => format!("{} ({})", label, k),
+        None => label.clone(),
+    };
+    Element::row()
         .width_match()
         .cross(Align::Center)
         .spacing(10)
         .padding_xy(12, 8)
         .corner(8.0)
         .clickable()
+        .tooltip(tip)
         .child(Element::image_content(icons::gray(icon)).size(18, 18))
         .child(
             Element::label(label)
                 .font_size(13.5)
                 .fg_role(Role::Text)
                 .weight(1.0),
-        );
-    if let Some(k) = shortcut {
-        row = row.child(
-            Element::label(k.to_string())
-                .font_size(11.5)
-                .fg_role(Role::TextSubtle),
-        );
-    }
-    row
+        )
 }
 
 fn doc_row(state: &AppState, entry: DocEntry) -> Element {

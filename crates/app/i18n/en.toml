@@ -205,6 +205,12 @@ unknown = "Other"
 
 [settings]
 title = "Settings"
+renderer = "Renderer"
+renderer_auto = "Auto"
+renderer_software = "Software"
+renderer_gpu = "GPU"
+renderer_hint = "Auto: GPU first, software fallback; restart to apply"
+restart_required = "Takes effect after restart"
 appearance = "Appearance"
 features = "Features"
 tools = "Tools"

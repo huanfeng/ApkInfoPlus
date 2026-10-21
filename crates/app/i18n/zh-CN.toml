@@ -205,6 +205,12 @@ unknown = "其他"
 
 [settings]
 title = "设置"
+renderer = "渲染后端"
+renderer_auto = "自动"
+renderer_software = "软件"
+renderer_gpu = "GPU"
+renderer_hint = "自动：优先 GPU，不可用时回退软件；重启后生效"
+restart_required = "重启应用后生效"
 appearance = "外观"
 features = "功能"
 tools = "工具"

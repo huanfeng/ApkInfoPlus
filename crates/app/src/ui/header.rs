@@ -209,15 +209,23 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         (None, None) => String::new(),
     };
 
+    // 摘要一行只放数字，完整的 Android 版本名放在悬停提示里，免得信息少时也折成两三行。
     let mut summary = vec![format_file_size(info.size)];
+    let mut tip = vec![format_file_size(info.size)];
     if let Some(min) = meta.min_sdk_version {
-        summary.push(format!("minSdk {}", sdk_version_text(Some(min))));
+        summary.push(format!("minSdk {}", min));
+        tip.push(format!("minSdk {}", sdk_version_text(Some(min))));
     }
     if let Some(t) = meta.target_sdk_version {
-        summary.push(format!("targetSdk {}", sdk_version_text(Some(t))));
+        summary.push(format!("targetSdk {}", t));
+        tip.push(format!("targetSdk {}", sdk_version_text(Some(t))));
+    }
+    if let Some(c) = meta.compile_sdk_version {
+        tip.push(format!("compileSdk {}", sdk_version_text(Some(c))));
     }
     if !meta.native_codes.is_empty() {
         summary.push(meta.native_codes.join(", "));
+        tip.push(meta.native_codes.join(", "));
     }
 
     Element::col()
@@ -235,7 +243,10 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         .child(
             Element::label(summary.join("  ·  "))
                 .font_size(12.5)
-                .fg_role(Role::TextSubtle),
+                .fg_role(Role::TextSubtle)
+                .max_lines(1)
+                .truncate(Truncate::End)
+                .tooltip(tip.join("\n")),
         )
 }
 
@@ -249,7 +260,7 @@ fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
         .child(
             Element::button(t!("action.install"))
                 .icon_content(icons::content("play", icons::ICON_WHITE))
-                .tooltip("Ctrl+I")
+                .tooltip(format!("{} (Ctrl+I)", tr!("install.install_to_device")))
                 .on_click({
                     let st = st.clone();
                     move |ctx| actions::open_install(&st, ctx)
@@ -260,7 +271,7 @@ fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
                 .icon_content(icons::gray("pencil"))
                 .neutral()
                 .outline_soft()
-                .tooltip("F2")
+                .tooltip(format!("{} (F2)", tr!("rename.title")))
                 .on_click({
                     let st = st.clone();
                     move |ctx| actions::open_rename(&st, ctx)

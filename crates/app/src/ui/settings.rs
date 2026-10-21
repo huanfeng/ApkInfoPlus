@@ -11,7 +11,7 @@ use windui::core::EventCtx;
 use windui::prelude::*;
 
 use crate::actions;
-use crate::config::{ThemeMode, ToolSource};
+use crate::config::{RendererMode, ThemeMode, ToolSource};
 use crate::state::{AppState, Msg};
 
 /// 下载 platform-tools 的进度状态，挂在 AppState 上（下载可能比设置窗活得久）。
@@ -103,6 +103,7 @@ thread_local! {
 struct Watcher {
     language: (Signal<usize>, u64),
     theme_mode: (Signal<usize>, u64),
+    renderer: (Signal<usize>, u64),
     accent: (Signal<Color>, u64),
     title_width: (Signal<f64>, u64),
     adb_source: (Signal<usize>, u64),
@@ -112,11 +113,26 @@ struct Watcher {
     dl_changed: u64,
     locales: Vec<String>,
     resolved: Signal<String>,
+    /// 关于页「基于 windui … · 渲染后端 …」，实际后端只有拿到 ctx 才问得到。
+    framework: Signal<String>,
 }
 
 impl Watcher {
     fn poll(&mut self, state: &AppState, ctx: &mut EventCtx) {
-        let _ = ctx;
+        if self.framework.with(|f| f.is_empty()) {
+            self.framework.set(tr!(
+                "settings.framework",
+                version = windui::VERSION,
+                renderer = ctx.active_renderer().name()
+            ));
+        }
+        if changed(&mut self.renderer) {
+            let mode = RendererMode::ALL[self.renderer.0.get().min(2)];
+            if state.cfg(|c| c.renderer) != mode {
+                state.update_config(|c| c.renderer = mode);
+                ctx.toast(tr!("settings.restart_required"));
+            }
+        }
         if changed(&mut self.language) {
             let idx = self.language.0.get();
             let lang = if idx == 0 {
@@ -233,6 +249,8 @@ fn build(state: &AppState) -> Element {
     };
     let language = signal(lang_idx);
     let theme_mode = signal(state.cfg(|c| c.theme_mode.index()));
+    let renderer = signal(state.cfg(|c| c.renderer.index()));
+    let framework = signal(String::new());
     let accent_initial = state
         .cfg(|c| c.accent_color)
         .map(Color::hex)
@@ -260,6 +278,18 @@ fn build(state: &AppState) -> Element {
                             tr!("settings.theme_system"),
                         ],
                         theme_mode,
+                    ),
+                ))
+                .child(Element::setting_row_desc(
+                    tr!("settings.renderer"),
+                    tr!("settings.renderer_hint"),
+                    Element::segmented(
+                        vec![
+                            tr!("settings.renderer_auto"),
+                            tr!("settings.renderer_software"),
+                            tr!("settings.renderer_gpu"),
+                        ],
+                        renderer,
                     ),
                 ))
                 .child(Element::setting_row(
@@ -666,13 +696,9 @@ fn build(state: &AppState) -> Element {
                 .child(Element::label(t!("about.license")).fg_role(Role::TextMuted))
                 .child(Element::link(t!("settings.homepage")).url(env!("CARGO_PKG_REPOSITORY")))
                 .child(
-                    Element::label(tr!(
-                        "settings.framework",
-                        version = windui::VERSION,
-                        renderer = "software"
-                    ))
-                    .font_size(12.0)
-                    .fg_role(Role::TextSubtle),
+                    Element::label(framework)
+                        .font_size(12.0)
+                        .fg_role(Role::TextSubtle),
                 )
                 .child(
                     Element::row()
@@ -698,6 +724,7 @@ fn build(state: &AppState) -> Element {
         *w.borrow_mut() = Some(Watcher {
             language: (language, language.version()),
             theme_mode: (theme_mode, theme_mode.version()),
+            renderer: (renderer, renderer.version()),
             accent: (accent, accent.version()),
             title_width: (title_width, title_width.version()),
             adb_source: (adb_source, adb_source.version()),
@@ -706,6 +733,7 @@ fn build(state: &AppState) -> Element {
             dl_changed: state.download.changed.version(),
             locales: locale_ids,
             resolved,
+            framework,
         })
     });
 

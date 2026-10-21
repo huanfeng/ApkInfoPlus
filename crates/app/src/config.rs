@@ -26,6 +26,27 @@ impl ThemeMode {
     }
 }
 
+/// 渲染后端：自动（GPU 优先、不可用回退软件）/ 软件光栅 / 强制 GPU。改了要重启。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RendererMode {
+    #[default]
+    Auto,
+    Software,
+    Gpu,
+}
+
+impl RendererMode {
+    pub const ALL: [RendererMode; 3] = [
+        RendererMode::Auto,
+        RendererMode::Software,
+        RendererMode::Gpu,
+    ];
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|m| *m == self).unwrap_or(0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSource {
@@ -51,6 +72,7 @@ pub struct Config {
     /// `auto` 跟随系统，否则是 BCP-47（`zh-CN` / `en`）。
     pub language: String,
     pub theme_mode: ThemeMode,
+    pub renderer: RendererMode,
     /// `0xRRGGBB`；`None` 用 windui 默认强调色。
     pub accent_color: Option<u32>,
     /// 字段标题列宽（逻辑像素）。
@@ -82,6 +104,7 @@ impl Default for Config {
         Self {
             language: "auto".into(),
             theme_mode: ThemeMode::System,
+            renderer: RendererMode::Auto,
             accent_color: None,
             title_width: 110,
             enable_signature: true,

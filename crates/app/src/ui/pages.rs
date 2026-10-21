@@ -79,22 +79,17 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
     if doc.tab.get() >= count {
         doc.tab.set(0);
     }
-    // 标签条放在白色卡片里，各页内容自带 Bg 底色，于是只有标签条是白的。
+    // 标签条直接放在浅灰底上：套白色圆角块会在标签条与内容之间露出一道白缝，
+    // 描边又会被内容压住一半，看起来像信息跑到了卡片外。
     Element::col()
         .fill()
         .padding_edges(Insets::new(
             super::PAGE_PAD,
             super::CARD_GAP,
             super::PAGE_PAD,
-            0,
+            super::PAGE_PAD,
         ))
-        .child(
-            Element::tabs_icons(doc.tab, pages)
-                .fill()
-                .bg_role(Role::Surface)
-                .corner(super::CARD_CORNER)
-                .border_role(Role::Border, 1),
-        )
+        .child(Element::tabs_icons(doc.tab, pages).fill())
 }
 
 fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
@@ -129,20 +124,22 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             t!("field.application_class"),
             m.application_name.clone().unwrap_or_default(),
         ))
-        .child(sdk_row(state, t!("field.min_sdk"), m.min_sdk_version, None))
-        .child(sdk_row(
+        .child(field_row(
+            state,
+            t!("field.min_sdk"),
+            sdk_version_text(m.min_sdk_version),
+        ))
+        .child(field_row(
             state,
             t!("field.target_sdk"),
-            m.target_sdk_version,
-            None,
+            sdk_version_text(m.target_sdk_version),
         ));
     if m.compile_sdk_version.is_some() {
-        basic = basic.child(sdk_row(
-            state,
-            t!("field.compile_sdk"),
-            m.compile_sdk_version,
-            m.compile_sdk_version_codename.as_deref(),
-        ));
+        let mut v = sdk_version_text(m.compile_sdk_version);
+        if let Some(c) = &m.compile_sdk_version_codename {
+            v.push_str(&format!(" [{}]", c));
+        }
+        basic = basic.child(field_row(state, t!("field.compile_sdk"), v));
     }
     basic = basic.child(field_row(
         state,
@@ -334,28 +331,6 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         col = col.child(section("cpu", CARD_GREEN, tr!("field.features"), feat));
     }
     page(col)
-}
-
-/// SDK 行：只显示数字，鼠标悬停看「Android x (代号)」。
-fn sdk_row(
-    state: &AppState,
-    title: impl Into<TextContent>,
-    sdk: Option<i64>,
-    codename: Option<&str>,
-) -> Element {
-    let Some(v) = sdk else {
-        return field_row(state, title, String::new());
-    };
-    let mut tip = sdk_version_text(Some(v));
-    if let Some(c) = codename {
-        tip.push_str(&format!(" [{}]", c));
-    }
-    field_row_custom(
-        state,
-        title,
-        super::selectable(v.to_string()).tooltip(tip),
-        None,
-    )
 }
 
 /// 概览页的证书摘要：状态文案 + 第一个签名者的几项关键信息。
