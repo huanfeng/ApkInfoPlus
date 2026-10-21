@@ -91,7 +91,8 @@ fn body(state: &AppState) -> Element {
         content_area,
         state.sidebar_ratio,
         SplitOpts {
-            thickness: 6,
+            // 拖动条本身就是两栏间的空隙：比外边距略窄，两张卡片靠得更紧凑。
+            thickness: 8,
             min: 0.14,
             max: 0.45,
         },
@@ -138,7 +139,7 @@ fn sidebar(state: &AppState) -> Element {
     let head = Element::row()
         .width_match()
         .cross(Align::Center)
-        .padding_edges(Insets::new(16, 10, 12, 4))
+        .padding_edges(Insets::new(16, 8, 10, 2))
         .child(
             Element::label(Signal::map(docs, |v| {
                 tr!("sidebar.title", count = v.len() as i64)
@@ -149,8 +150,7 @@ fn sidebar(state: &AppState) -> Element {
             .weight(1.0),
         )
         .child(
-            Element::link(t!("sidebar.close_all"))
-                .font_size(12.5)
+            icons::button("close_all", 24, tr!("sidebar.close_all"))
                 .enabled_when(move || docs.with(|v| !v.is_empty()))
                 .on_click({
                     let st = st.clone();
@@ -409,37 +409,45 @@ fn pending_panel(state: &AppState, doc: Rc<Doc>) -> Element {
 /// 没打开文件时的大拖放区。
 fn empty_state(state: &AppState) -> Element {
     let st = state.clone();
-    Element::col().fill().padding(super::PAGE_PAD).child(
-        Element::col()
-            .fill()
-            .cross(Align::Center)
-            .spacing(10)
-            .corner(super::CARD_CORNER)
-            .border_role(Role::Border, 2)
-            .bg_role_alpha(Role::Accent, 0.04)
-            .clickable()
-            .on_click({
-                let st = st.clone();
-                move |ctx| actions::pick_file(&st, ctx)
-            })
-            .child(Element::flex_spacer())
-            .child(Element::image_content(icons::gray("package")).size(72, 72))
-            .child(
-                Element::label(t!("drop.hint"))
-                    .font_size(18.0)
-                    .font_weight(600)
-                    .fg_role(Role::Text),
-            )
-            .child(
-                Element::label(t!("drop.or_open"))
-                    .font_size(13.5)
-                    .fg_role(Role::TextMuted),
-            )
-            .child(
-                Element::label(t!("drop.supported"))
-                    .font_size(12.0)
-                    .fg_role(Role::TextSubtle),
-            )
-            .child(Element::flex_spacer()),
-    )
+    Element::col()
+        .fill()
+        .padding_edges(Insets::new(
+            0,
+            super::PAGE_PAD,
+            super::PAGE_PAD,
+            super::PAGE_PAD,
+        ))
+        .child(
+            Element::col()
+                .fill()
+                .cross(Align::Center)
+                .spacing(10)
+                .corner(super::CARD_CORNER)
+                .border_role(Role::Border, 2)
+                .bg_role_alpha(Role::Accent, 0.04)
+                .clickable()
+                .on_click({
+                    let st = st.clone();
+                    move |ctx| actions::pick_file(&st, ctx)
+                })
+                .child(Element::flex_spacer())
+                .child(Element::image_content(icons::gray("package")).size(72, 72))
+                .child(
+                    Element::label(t!("drop.hint"))
+                        .font_size(18.0)
+                        .font_weight(600)
+                        .fg_role(Role::Text),
+                )
+                .child(
+                    Element::label(t!("drop.or_open"))
+                        .font_size(13.5)
+                        .fg_role(Role::TextMuted),
+                )
+                .child(
+                    Element::label(t!("drop.supported"))
+                        .font_size(12.0)
+                        .fg_role(Role::TextSubtle),
+                )
+                .child(Element::flex_spacer()),
+        )
 }

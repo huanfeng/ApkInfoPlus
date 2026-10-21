@@ -300,7 +300,7 @@ pub fn section_with_action(
 
 /// 页面骨架：可滚动 + 统一内边距。
 pub fn page(body: Element) -> Element {
-    Element::scroll().fill().bg_role(Role::Bg).child(
+    Element::scroll().fill().child(
         Element::col()
             .width_match()
             .padding_edges(Insets::new(

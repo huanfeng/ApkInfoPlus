@@ -79,17 +79,23 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
     if doc.tab.get() >= count {
         doc.tab.set(0);
     }
-    // 标签条直接放在浅灰底上：套白色圆角块会在标签条与内容之间露出一道白缝，
-    // 描边又会被内容压住一半，看起来像信息跑到了卡片外。
+    // 标签条与各页内容同在一张白色卡片里（概览头一张、这里一张），页面本身不再铺底色，
+    // 标签与内容之间不会露出一道色差。
     Element::col()
         .fill()
         .padding_edges(Insets::new(
-            super::PAGE_PAD,
+            0,
             super::CARD_GAP,
             super::PAGE_PAD,
             super::PAGE_PAD,
         ))
-        .child(Element::tabs_icons(doc.tab, pages).fill())
+        .child(
+            Element::tabs_icons(doc.tab, pages)
+                .fill()
+                .bg_role(Role::Surface)
+                .corner(super::CARD_CORNER)
+                .border_role(Role::Border, 1),
+        )
 }
 
 fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
@@ -480,7 +486,6 @@ fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
 
     Element::col()
         .fill()
-        .bg_role(Role::Bg)
         .padding_edges(Insets::new(
             super::PAGE_PAD,
             super::CARD_GAP,
@@ -838,7 +843,6 @@ fn text_info(state: &AppState, info: Rc<ApkInfo>) -> Element {
     let _ = state;
     Element::col()
         .fill()
-        .bg_role(Role::Bg)
         .padding_edges(Insets::new(
             super::PAGE_PAD,
             super::CARD_GAP,

@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use apkinfo_core::info::{format_file_size, sdk_version_text, ApkInfo, SignatureInfo};
+use apkinfo_core::info::{format_file_size, sdk_version_text, ApkInfo};
 use windui::prelude::*;
 
 use crate::actions;
@@ -14,12 +14,7 @@ pub const ICON_SIZE: i32 = 96;
 pub fn build(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     Element::col()
         .width_match()
-        .padding_edges(Insets::new(
-            super::PAGE_PAD,
-            super::PAGE_PAD,
-            super::PAGE_PAD,
-            0,
-        ))
+        .padding_edges(Insets::new(0, super::PAGE_PAD, super::PAGE_PAD, 0))
         .child(
             Element::row()
                 .width_match()
@@ -145,11 +140,12 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             .truncate(Truncate::End),
         doc.display_label(),
     );
+    // 应用名独占一行并按宽度截断；徽章挪到版本那一行，长名字 + 多签名方案也不会被挤到按钮下面。
     let mut name_row = Element::row()
         .width_match()
         .cross(Align::Center)
         .spacing(10)
-        .child(name_label);
+        .child(name_label.weight(1.0));
     if has_alternatives {
         let d = doc.clone();
         name_row = name_row.child(
@@ -157,34 +153,44 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
                 .on_click(move |ctx| actions::show_label_menu(&d, ctx)),
         );
     }
-    // 格式徽章 + 签名方案（解析完成后出现）+ 分包 / OBB 徽章都跟在应用名后面。
-    // 签名徽章不用 host_signal——它是撑满的 col，放进这一行会把整块文字区撑开。
-    name_row = name_row.child(super::kind_badge(info.kind));
+    // 签名方案合成一枚徽章（「签名 v1 · v2 · v3」），解析完成后出现。
+    // 不用 host_signal——它是撑满的 col，放进这一行会把整块文字区撑开。
     let signature = doc.signature;
-    for (scheme, pick) in [
-        (
-            "v1",
-            (|s: &SignatureInfo| s.has_v1) as fn(&SignatureInfo) -> bool,
-        ),
-        ("v2", |s| s.has_v2),
-        ("v3", |s| s.has_v3),
-        ("v3.1", |s| s.has_v31),
-    ] {
-        name_row = name_row.child(
-            Element::badge_intent(
-                format!("{} {}", tr!("tab.signature"), scheme),
-                Intent::Success,
-            )
-            .visible_when(move || signature.with(|v| v.first().is_some_and(|s| pick(s)))),
+    let schemes = Signal::map(signature, |v| {
+        let Some(s) = v.first() else {
+            return String::new();
+        };
+        let names: Vec<&str> = [
+            (s.has_v1, "v1"),
+            (s.has_v2, "v2"),
+            (s.has_v3, "v3"),
+            (s.has_v31, "v3.1"),
+        ]
+        .iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, n)| *n)
+        .collect();
+        if names.is_empty() {
+            String::new()
+        } else {
+            format!("{} {}", tr!("tab.signature"), names.join(" · "))
+        }
+    });
+    let mut badges = Element::row()
+        .cross(Align::Center)
+        .spacing(6)
+        .child(super::kind_badge(info.kind))
+        .child(
+            Element::badge_intent(schemes, Intent::Success)
+                .visible_when(move || schemes.with(|t| !t.is_empty())),
         );
-    }
     if info.is_archive() {
-        name_row = name_row.child(Element::badge_intent(
+        badges = badges.child(Element::badge_intent(
             tr!("field.split_badge", count = info.splits.len() as i64),
             Intent::Primary,
         ));
         if !info.obbs.is_empty() {
-            name_row = name_row.child(Element::badge_intent("OBB", Intent::Warning));
+            badges = badges.child(Element::badge_intent("OBB", Intent::Warning));
         }
     }
 
@@ -233,13 +239,22 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         .spacing(6)
         .child(name_row)
         .child(package_row)
-        .child(super::with_copy_menu(
-            Element::label(version.clone())
-                .font_size(16.0)
-                .font_weight(500)
-                .fg_role(Role::Text),
-            version,
-        ))
+        .child(
+            Element::row()
+                .width_match()
+                .cross(Align::Center)
+                .spacing(12)
+                .child(super::with_copy_menu(
+                    Element::label(version.clone())
+                        .font_size(16.0)
+                        .font_weight(500)
+                        .fg_role(Role::Text)
+                        .max_lines(1)
+                        .truncate(Truncate::End),
+                    version,
+                ))
+                .child(badges),
+        )
         .child(
             Element::label(summary.join("  ·  "))
                 .font_size(12.5)

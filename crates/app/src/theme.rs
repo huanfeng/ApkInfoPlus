@@ -79,6 +79,8 @@ pub fn make_theme(cfg: &Config, system_dark: bool) -> Theme {
     theme.metrics.corner_md = 8.0;
     theme.metrics.corner_lg = 12.0;
     theme.button.corner = Some(8.0);
+    // 左右栏之间的拖动条平时不画线（两张卡片之间的空隙本身就是分隔），悬停 / 拖动时才亮出来。
+    theme.split.handle = Some(Color::TRANSPARENT);
     // 设置页表单行：标题略大一点，与主窗字段行统一。
     theme.form.label_size = Some(13.5);
     theme.form.desc_size = Some(12.0);
