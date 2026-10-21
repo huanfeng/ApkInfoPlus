@@ -1,0 +1,8 @@
+/target
+/.remember
+/.omc
+/.claude
+*.log
+/artifacts
+/dist
+.DS_Store

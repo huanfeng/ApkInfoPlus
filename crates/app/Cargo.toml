@@ -1,0 +1,19 @@
+[package]
+name = "apkinfoplus"
+description = "APK Info Plus：轻量跨平台 Android 安装包信息与安装工具"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "apkinfoplus"
+path = "src/main.rs"
+
+[dependencies]
+apkinfo-core = { path = "../core" }
+windui = "0.25"
+log.workspace = true
+serde.workspace = true
+toml = "0.8"
+dirs = "6"

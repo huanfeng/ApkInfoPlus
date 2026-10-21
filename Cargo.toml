@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/huanfeng/apkinfoplus"
+
+[workspace.dependencies]
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+# 应用（crates/app）的 release 档：体积优先。windui 的说明里强调 macOS 下
+# `panic = "abort"` 会让 objc2 的 catch-all 失效，这里保留 unwind。
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
