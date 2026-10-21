@@ -65,6 +65,32 @@ pub fn field_row_with(
     row
 }
 
+/// 「标题 | 任意元素 | （可选）复制」一行。
+pub fn field_row_custom(
+    state: &AppState,
+    title: impl Into<TextContent>,
+    value: Element,
+    copy: Option<String>,
+) -> Element {
+    let width = state.title_width.get();
+    let mut row = Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(12)
+        .padding_xy(0, 5)
+        .child(
+            Element::label(title)
+                .width(width)
+                .font_size(13.0)
+                .fg_role(Role::TextMuted),
+        )
+        .child(value.weight(1.0));
+    if let Some(v) = copy.filter(|v| !v.is_empty()) {
+        row = row.child(copy_button(v));
+    }
+    row
+}
+
 /// 复制到剪贴板的小图标按钮，带 toast 反馈。
 pub fn copy_button(value: String) -> Element {
     crate::icons::button("copy", 24, tr!("action.copy")).on_click(move |ctx| {

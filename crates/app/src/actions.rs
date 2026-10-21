@@ -14,13 +14,15 @@ use windui::core::EventCtx;
 use windui::event::MenuItem;
 use windui::prelude::*;
 
-use crate::state::{AppState, Doc, HashState, Msg, SigState};
+use crate::state::{AppState, Doc, HashState, IconThumb, Msg, SigState};
 use crate::ui::shorten;
 
 /// 导出时渲染的尺寸。
 const EXPORT_ICON_SIZE: u32 = 1024;
 /// 预览渲染尺寸（高 DPI 下 96 逻辑像素最多需要 ~200 物理像素，取 256 留余量）。
 const PREVIEW_ICON_SIZE: u32 = 256;
+/// 概览页图标条的缩略图尺寸。
+const THUMB_ICON_SIZE: u32 = 96;
 
 // ---------------------------------------------------------------------------
 // 后台线程：panic 兜底
@@ -352,6 +354,62 @@ pub fn select_icon(state: &AppState, doc: &Rc<Doc>, index: usize) {
     });
 }
 
+/// 把全部候选渲染成缩略图（同步，在调用线程上跑）。渲染失败的候选跳过。
+fn render_thumbs(
+    session: &Arc<Mutex<apkinfo_core::load::IconSession>>,
+    candidates: &[IconCandidate],
+) -> Vec<IconThumb> {
+    let mut out = Vec::new();
+    let mut guard = match session.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    for (index, c) in candidates.iter().enumerate() {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            guard.render(c, THUMB_ICON_SIZE, false)
+        }));
+        if let Ok(Ok(img)) = r {
+            out.push(IconThumb {
+                index,
+                label: thumb_label(c),
+                image: img,
+            });
+        }
+    }
+    out
+}
+
+/// 缩略图下方的小字：密度名；没有密度的按类型给。
+fn thumb_label(c: &IconCandidate) -> String {
+    if let Some(d) = &c.dpi_label {
+        return d.clone();
+    }
+    if c.path == apkinfo_core::load::ARCHIVE_ICON_PATH {
+        return "png".into();
+    }
+    match c.kind {
+        IconKind::XmlVector => "xml".into(),
+        IconKind::Bitmap => "png".into(),
+    }
+}
+
+/// 后台渲染缩略图条，结果经 `Msg::IconThumbs` 回来。
+fn spawn_thumbs(state: &AppState, doc: &Rc<Doc>) {
+    let Some(session) = doc.session.borrow().clone() else {
+        return;
+    };
+    let candidates = doc.icon_candidates.get();
+    if candidates.is_empty() {
+        return;
+    }
+    let gen = doc.gen.get();
+    let tx = state.tx.clone();
+    thread::spawn(move || {
+        let thumbs = render_thumbs(&session, &candidates);
+        let _ = tx.send(Msg::IconThumbs { gen, thumbs });
+    });
+}
+
 /// 图标右键 / 导出菜单。
 pub fn icon_menu_items(state: &AppState, doc: &Rc<Doc>) -> Vec<MenuItem> {
     let mut items = Vec::new();
@@ -577,6 +635,75 @@ pub fn show_label_menu(doc: &Rc<Doc>, ctx: &mut EventCtx) {
 }
 
 // ---------------------------------------------------------------------------
+// 目标设备选择（概览头）
+// ---------------------------------------------------------------------------
+
+/// 「选择设备」菜单：列出 adb 设备，勾选即设为默认目标；列表为空时先去取一次。
+pub fn show_device_menu(state: &AppState, ctx: &mut EventCtx) {
+    let ins = &state.install;
+    let rows = ins.devices.get();
+    if rows.is_empty() && !ins.loading_devices.get() {
+        crate::ui::install::refresh_devices(state, ctx);
+    }
+    let current = state.selected_device.get().map(|(id, _)| id);
+    let mut items = Vec::new();
+    if ins.loading_devices.get() && rows.is_empty() {
+        items.push(MenuItem::run(tr!("install.loading_devices"), |_| {}, false).enabled(false));
+    } else if rows.is_empty() {
+        let msg = ins.device_error.get();
+        let msg = if msg.is_empty() {
+            tr!("install.no_devices")
+        } else {
+            msg
+        };
+        items.push(MenuItem::run(msg, |_| {}, false).enabled(false));
+    }
+    for r in &rows {
+        let d = &r.device;
+        let usable = !d.is_offline() && !d.is_unauthorized();
+        let name = d.display_name();
+        let label = if usable {
+            name.clone()
+        } else if d.is_offline() {
+            format!("{}  ({})", name, tr!("install.offline"))
+        } else {
+            format!("{}  ({})", name, tr!("install.unauthorized"))
+        };
+        let sel = state.selected_device;
+        let id = d.id.clone();
+        let checked = current.as_deref() == Some(&d.id);
+        items.push(
+            MenuItem::run(
+                label,
+                move |_| sel.set(Some((id.clone(), name.clone()))),
+                checked,
+            )
+            .enabled(usable),
+        );
+    }
+    items.push(MenuItem::separator());
+    {
+        let sel = state.selected_device;
+        items.push(MenuItem::run(
+            tr!("install.any_device"),
+            move |_| sel.set(None),
+            current.is_none(),
+        ));
+    }
+    {
+        let st = state.clone();
+        items.push(MenuItem::run(
+            tr!("install.refresh_devices"),
+            move |ctx| crate::ui::install::refresh_devices(&st, ctx),
+            false,
+        ));
+    }
+    let mut req = windui::event::MenuRequest::below(ctx.bounds(), items);
+    req.click_through = false;
+    ctx.show_menu_request(req);
+}
+
+// ---------------------------------------------------------------------------
 // 对话框 / 子窗口
 // ---------------------------------------------------------------------------
 
@@ -651,6 +778,8 @@ pub fn load_sync(state: &AppState, path: PathBuf) -> u64 {
                         }
                     }
                 }
+                let thumbs = render_thumbs(&session, &candidates);
+                doc.icon_thumbs.set(vec![Rc::new(thumbs)]);
             }
         }
         Err(e) => apply_parse_error(state, &doc, e.to_string()),
@@ -707,6 +836,7 @@ pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
                     // 先渲染第一个候选；失败则依次尝试后面的（在 Msg::Icon 里接力）。
                     if doc.icon_candidates.with(|c| !c.is_empty()) {
                         select_icon(state, &doc, 0);
+                        spawn_thumbs(state, &doc);
                     }
                 }
                 Err(e) => {
@@ -747,6 +877,11 @@ pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
                         }
                     }
                 }
+            }
+        }
+        Msg::IconThumbs { gen, thumbs } => {
+            if let Some(doc) = state.doc_by_gen(gen) {
+                doc.icon_thumbs.set(vec![Rc::new(thumbs)]);
             }
         }
         Msg::Hashes { gen, result } => {

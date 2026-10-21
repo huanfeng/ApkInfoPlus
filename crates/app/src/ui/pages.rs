@@ -4,14 +4,12 @@
 
 use std::rc::Rc;
 
-use apkinfo_core::info::{
-    format_file_size, format_file_size_full, sdk_version_text, ApkInfo, SplitType,
-};
+use apkinfo_core::info::{format_file_size, format_file_size_full, ApkInfo, SplitType};
 use windui::prelude::*;
 
 use super::{
-    copy_button, field_row, field_row_with, join_lines, mono_block, page, section,
-    section_with_action,
+    copy_button, field_row, field_row_custom, field_row_with, join_lines, mono_block, page,
+    section, section_with_action,
 };
 use crate::state::{AppState, Doc, HashState, SigState};
 
@@ -34,7 +32,7 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
         (
             tr!("tab.overview"),
             icon("info"),
-            overview(state, info.clone()),
+            overview(state, &doc, info.clone()),
         ),
         (perm_title, icon("key"), permissions(&doc, info.clone())),
     ];
@@ -64,31 +62,10 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
         .child(Element::tabs_icons(doc.tab, pages).fill())
 }
 
-fn overview(state: &AppState, info: Rc<ApkInfo>) -> Element {
+fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     let m = &info.meta;
-    let file_section = section(
-        tr!("field.file"),
-        Element::col()
-            .width_match()
-            .child(field_row(
-                state,
-                t!("field.file"),
-                info.path.display().to_string(),
-            ))
-            .child(field_row_with(
-                state,
-                t!("field.size"),
-                format_file_size_full(info.size),
-                false,
-            ))
-            .child(field_row_with(
-                state,
-                t!("field.archive_type"),
-                info.kind.display_name().to_string(),
-                false,
-            )),
-    );
 
+    // ---- 左：基本信息 ----
     let mut basic = Element::col()
         .width_match()
         .child(field_row(
@@ -111,29 +88,37 @@ fn overview(state: &AppState, info: Rc<ApkInfo>) -> Element {
             t!("field.version_name"),
             m.version_name.clone().unwrap_or_default(),
         ))
-        .child(field_row_with(
+        .child(field_row(
             state,
-            t!("field.min_sdk"),
-            sdk_version_text(m.min_sdk_version),
-            false,
+            t!("field.application_class"),
+            m.application_name.clone().unwrap_or_default(),
         ))
-        .child(field_row_with(
+        .child(sdk_row(state, t!("field.min_sdk"), m.min_sdk_version, None))
+        .child(sdk_row(
             state,
             t!("field.target_sdk"),
-            sdk_version_text(m.target_sdk_version),
-            false,
+            m.target_sdk_version,
+            None,
         ));
     if m.compile_sdk_version.is_some() {
-        let mut v = sdk_version_text(m.compile_sdk_version);
-        if let Some(c) = &m.compile_sdk_version_codename {
-            v.push_str(&format!(" [{}]", c));
-        }
-        basic = basic.child(field_row_with(state, t!("field.compile_sdk"), v, false));
+        basic = basic.child(sdk_row(
+            state,
+            t!("field.compile_sdk"),
+            m.compile_sdk_version,
+            m.compile_sdk_version_codename.clone(),
+        ));
     }
-    basic = basic.child(field_row(
+    basic = basic.child(field_row_with(
         state,
-        t!("field.application_class"),
-        m.application_name.clone().unwrap_or_default(),
+        t!("field.size"),
+        format_file_size_full(info.size),
+        false,
+    ));
+    basic = basic.child(field_row_custom(
+        state,
+        t!("field.app_icon"),
+        icon_strip(state, doc),
+        None,
     ));
     let activities: Vec<String> = m
         .launchable_activities
@@ -145,10 +130,67 @@ fn overview(state: &AppState, info: Rc<ApkInfo>) -> Element {
         t!("field.launchable_activities"),
         activities.join("\n"),
     ));
-    let basic_section = section(tr!("tab.overview"), basic);
+    let left = section(tr!("field.basic_info"), basic);
 
-    let mut platform = Element::col()
+    // ---- 右：其他信息 ----
+    let path_text = info.path.display().to_string();
+    let open_dir = {
+        let p = info.path.clone();
+        crate::icons::button("folder", 24, tr!("action.open_dir")).on_click(move |ctx| {
+            if let Err(e) = crate::actions::reveal_in_file_manager(&p) {
+                ctx.toast_err(e);
+            }
+        })
+    };
+    let mut other = Element::col()
         .width_match()
+        .child(field_row_custom(
+            state,
+            t!("field.file"),
+            // 不设 width_match：在 weight 槽里它会按父宽度量、挤掉旁边的复制按钮。
+            Element::row()
+                .cross(Align::Center)
+                .spacing(4)
+                .child(
+                    Element::label(path_text.clone())
+                        .font_size(13.0)
+                        .fg_role(Role::Text)
+                        .weight(1.0),
+                )
+                .child(open_dir),
+            Some(path_text),
+        ))
+        .child(field_row_with(
+            state,
+            t!("field.archive_type"),
+            info.kind.display_name().to_string(),
+            false,
+        ));
+    if info.is_archive() {
+        if let Some(n) = &info.archive_app_name {
+            other = other.child(field_row(state, t!("field.app_name"), n.clone()));
+        }
+        if let Some(b) = &info.base_apk_entry {
+            other = other.child(field_row(state, t!("field.base_apk"), b.clone()));
+        }
+        if let Some(t) = info.total_size {
+            other = other.child(field_row_with(
+                state,
+                t!("field.total_size"),
+                format_file_size_full(t),
+                false,
+            ));
+        }
+        if !info.split_configs.is_empty() {
+            other = other.child(field_row(
+                state,
+                t!("field.split_configs"),
+                info.split_configs.join("  "),
+            ));
+        }
+    }
+    other = other
+        .child(field_row(state, t!("field.abi"), m.native_codes.join("  ")))
         .child(field_row_with(
             state,
             t!("field.screen_size"),
@@ -164,61 +206,162 @@ fn overview(state: &AppState, info: Rc<ApkInfo>) -> Element {
                 .collect::<Vec<_>>()
                 .join("  "),
             false,
-        ))
-        .child(field_row(state, t!("field.abi"), m.native_codes.join("  ")))
-        .child(field_row(
-            state,
-            t!("field.languages"),
-            m.locales.join("  "),
         ));
-    if !m.features.is_empty() {
-        platform = platform.child(field_row(
-            state,
-            t!("field.features"),
-            m.features.join("\n"),
-        ));
-    }
-    if !m.features_not_required.is_empty() {
-        platform = platform.child(field_row(
-            state,
-            t!("field.features_not_required"),
-            m.features_not_required.join("\n"),
-        ));
-    }
-    let platform_section = section(tr!("field.abi"), platform);
-
-    let mut col = Element::col()
+    // 语言列表动辄几十上百项：只显示数量，复制按钮给完整列表。
+    let locales = m.locales.join("  ");
+    other = other.child(field_row_custom(
+        state,
+        t!("field.languages"),
+        Element::label(if m.locales.is_empty() {
+            tr!("field.none")
+        } else {
+            tr!("field.language_count", count = m.locales.len() as i64)
+        })
+        .font_size(13.0)
+        .fg_role(if m.locales.is_empty() {
+            Role::TextSubtle
+        } else {
+            Role::Text
+        }),
+        Some(locales),
+    ));
+    let mut right = Element::col()
         .width_match()
         .spacing(14)
-        .child(basic_section)
-        .child(file_section);
-    if info.is_archive() {
-        let mut arc = Element::col().width_match();
-        if let Some(n) = &info.archive_app_name {
-            arc = arc.child(field_row(state, t!("field.app_name"), n.clone()));
-        }
-        if let Some(b) = &info.base_apk_entry {
-            arc = arc.child(field_row(state, t!("field.base_apk"), b.clone()));
-        }
-        if let Some(t) = info.total_size {
-            arc = arc.child(field_row_with(
+        .child(section(tr!("field.other_info"), other));
+    if !m.features.is_empty() || !m.features_not_required.is_empty() {
+        let mut feat = Element::col().width_match();
+        if !m.features.is_empty() {
+            feat = feat.child(field_row(
                 state,
-                t!("field.total_size"),
-                format_file_size_full(t),
-                false,
+                t!("field.features"),
+                m.features.join("\n"),
             ));
         }
-        if !info.split_configs.is_empty() {
-            arc = arc.child(field_row(
+        if !m.features_not_required.is_empty() {
+            feat = feat.child(field_row(
                 state,
-                t!("field.split_configs"),
-                info.split_configs.join("  "),
+                t!("field.features_not_required"),
+                m.features_not_required.join("\n"),
             ));
         }
-        col = col.child(section(info.kind.display_name(), arc));
+        right = right.child(section(tr!("field.features"), feat));
     }
-    col = col.child(platform_section);
-    page(col)
+
+    page(
+        Element::row()
+            .width_match()
+            .cross(Align::Start)
+            .spacing(14)
+            .child(Element::col().weight(5.0).child(left))
+            .child(right.weight(4.0)),
+    )
+}
+
+/// SDK 行：数字 + 「Android x」徽章。
+fn sdk_row(
+    state: &AppState,
+    title: impl Into<TextContent>,
+    sdk: Option<i64>,
+    codename: Option<String>,
+) -> Element {
+    let Some(v) = sdk else {
+        return field_row_with(state, title, String::new(), false);
+    };
+    let mut row = Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(8)
+        .child(
+            Element::label(v.to_string())
+                .font_size(13.0)
+                .fg_role(Role::Text),
+        );
+    if let Some(name) = apkinfo_core::info::android_version_name(v) {
+        row = row.child(Element::badge_intent(name, Intent::Primary));
+    }
+    if let Some(c) = codename {
+        row = row.child(
+            Element::label(format!("[{}]", c))
+                .font_size(12.0)
+                .fg_role(Role::TextSubtle),
+        );
+    }
+    field_row_custom(state, title, row, None)
+}
+
+/// 全部候选图标的缩略图条：点一格就把概览头的大图标切过去。
+fn icon_strip(state: &AppState, doc: &Rc<Doc>) -> Element {
+    let st = state.clone();
+    let d = doc.clone();
+    let loading = Element::label(t!("icon.loading"))
+        .font_size(12.0)
+        .fg_role(Role::TextSubtle)
+        .visible_when({
+            let thumbs = doc.icon_thumbs;
+            let candidates = doc.icon_candidates;
+            move || thumbs.with(|v| v.is_empty()) && candidates.with(|c| !c.is_empty())
+        });
+    let none = Element::label(t!("field.none"))
+        .font_size(13.0)
+        .fg_role(Role::TextSubtle)
+        .visible_when({
+            let candidates = doc.icon_candidates;
+            move || candidates.with(|c| c.is_empty())
+        });
+    let strip = Element::host_signal(
+        doc.icon_thumbs,
+        move |list: Rc<Vec<crate::state::IconThumb>>| {
+            let mut cells = Vec::new();
+            for t in list.iter() {
+                let st = st.clone();
+                let d = d.clone();
+                let index = t.index;
+                let selected = d.icon_index;
+                let frame = Element::stack()
+                    .size(56, 56)
+                    .corner(10.0)
+                    .child(
+                        Element::image_rgba(t.image.width, t.image.height, &t.image.data)
+                            .fit(Fit::Contain)
+                            .size(48, 48)
+                            .corner(8.0)
+                            .align_xy(Align::Center, Align::Center),
+                    )
+                    .child(
+                        Element::col()
+                            .size(56, 56)
+                            .corner(10.0)
+                            .border_role(Role::Accent, 2)
+                            .visible_when(move || selected.get() == index),
+                    );
+                cells.push(
+                    Element::col()
+                        .cross(Align::Center)
+                        .spacing(2)
+                        .padding(2)
+                        .corner(8.0)
+                        .clickable()
+                        .tooltip(t.label.clone())
+                        .on_click(move |_| crate::actions::select_icon(&st, &d, index))
+                        .child(frame)
+                        .child(
+                            Element::label(t.label.clone())
+                                .font_size(10.5)
+                                .fg_role(Role::TextMuted),
+                        ),
+                );
+            }
+            // 一行放不下就折行：grid 按列数等分宽度，7 列在默认窗宽下正好一格 ~64px。
+            Element::grid(7, 6, cells).width_match()
+        },
+    )
+    .width_match();
+    Element::col()
+        .width_match()
+        .child(none)
+        .child(loading)
+        .child(strip)
 }
 
 fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {

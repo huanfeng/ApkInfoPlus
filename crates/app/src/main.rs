@@ -42,9 +42,19 @@ fn main() {
         .windows(2)
         .find(|w| w[0] == "--theme")
         .map(|w| w[1].clone());
+    // `--size 1280x800`：同上，截图时指定窗口尺寸。
+    let size_override = args
+        .windows(2)
+        .find(|w| w[0] == "--size")
+        .and_then(|w| w[1].split_once('x'))
+        .and_then(|(w, h)| Some((w.parse::<i32>().ok()?, h.parse::<i32>().ok()?)));
     let mut cfg = cfg;
     if let Some(l) = &lang_override {
         cfg.language = l.clone();
+    }
+    if let Some((w, h)) = size_override {
+        cfg.window_width = w;
+        cfg.window_height = h;
     }
     match theme_override.as_deref() {
         Some("dark") => cfg.theme_mode = config::ThemeMode::Dark,
@@ -70,7 +80,7 @@ fn main() {
     let theme = theme::make_theme(&cfg, windui::event::system_prefers_dark());
 
     let mut app = App::new("APK Info Plus", cfg.window_width, cfg.window_height)
-        .min_size(720, 480)
+        .min_size(900, 600)
         .centered()
         .theme(theme)
         .locales(locales)

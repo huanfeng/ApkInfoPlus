@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use apkinfo_core::info::{format_file_size, sdk_version_text, ApkInfo};
+use apkinfo_core::info::{format_file_size, sdk_version_text, ApkInfo, SignatureInfo};
 use windui::prelude::*;
 
 use crate::actions;
@@ -154,6 +154,26 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         info.kind.display_name(),
         Intent::Primary,
     ));
+    // 签名方案徽章：签名解析完成后出现（v1 / v2 / v3 / v3.1）。
+    // 不用 host_signal——它是撑满的 col，放进这一行会把整块文字区撑开。
+    let signature = doc.signature;
+    for (scheme, pick) in [
+        (
+            "v1",
+            (|s: &SignatureInfo| s.has_v1) as fn(&SignatureInfo) -> bool,
+        ),
+        ("v2", |s| s.has_v2),
+        ("v3", |s| s.has_v3),
+        ("v3.1", |s| s.has_v31),
+    ] {
+        name_row = name_row.child(
+            Element::badge_intent(
+                format!("{} {}", tr!("tab.signature"), scheme),
+                Intent::Success,
+            )
+            .visible_when(move || signature.with(|v| v.first().is_some_and(|s| pick(s)))),
+        );
+    }
 
     let package = meta.package_name.clone().unwrap_or_default();
     let version = match (&meta.version_name, meta.version_code) {
@@ -202,12 +222,31 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         )
 }
 
-/// 右侧动作：安装到设备（与工具栏同一入口，放在最显眼的位置）。
+/// 右侧动作：安装到设备（与工具栏同一入口，放在最显眼的位置）+ 目标设备选择。
 fn action_block(state: &AppState) -> Element {
     let st = state.clone();
-    Element::col().spacing(8).child(
-        Element::button(t!("install.install_to_device"))
-            .icon_content(icons::content("play", icons::ICON_WHITE))
-            .on_click(move |ctx| actions::open_install(&st, ctx)),
-    )
+    let selected = state.selected_device;
+    let device_label = Signal::map(selected, |d| match d {
+        Some((_, name)) => name.clone(),
+        None => tr!("install.pick_device"),
+    });
+    Element::col()
+        .spacing(8)
+        .cross(Align::Stretch)
+        .child(
+            Element::button(t!("install.install_to_device"))
+                .icon_content(icons::content("play", icons::ICON_WHITE))
+                .on_click({
+                    let st = st.clone();
+                    move |ctx| actions::open_install(&st, ctx)
+                }),
+        )
+        .child(
+            Element::button(device_label)
+                .icon_content(icons::gray("smartphone"))
+                .neutral()
+                .outline()
+                .tooltip(tr!("install.select_device"))
+                .on_click(move |ctx| actions::show_device_menu(&st, ctx)),
+        )
 }

@@ -61,6 +61,9 @@ text_info = "텍스트 정보"
 activities = "구성 요소"
 
 [field]
+basic_info = "기본 정보"
+other_info = "기타 정보"
+app_icon = "앱 아이콘"
 file = "파일"
 size = "크기"
 archive_type = "파일 형식"
@@ -150,6 +153,8 @@ failed = "이름 바꾸기 실패: {error}"
 
 [install]
 title = "기기에 설치"
+pick_device = "기기 선택"
+any_device = "기기 지정 안 함"
 install_to_device = "기기에 설치"
 doc_closed = "설치할 파일이 닫혔습니다"
 select_device = "기기 선택"

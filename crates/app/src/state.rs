@@ -34,6 +34,11 @@ pub enum Msg {
         index: usize,
         result: Result<RgbaImage, String>,
     },
+    /// 全部候选图标的缩略图（概览页的图标条）。
+    IconThumbs {
+        gen: u64,
+        thumbs: Vec<IconThumb>,
+    },
     Hashes {
         gen: u64,
         result: Result<(String, String), String>,
@@ -72,6 +77,15 @@ pub enum SigState {
     NotApplicable,
 }
 
+/// 概览页图标条里的一格。
+#[derive(Clone)]
+pub struct IconThumb {
+    pub index: usize,
+    pub label: String,
+    /// 不包 `Rc`：要经消息通道跨线程送过来；整条列表到了 UI 线程再包一层 `Rc`。
+    pub image: RgbaImage,
+}
+
 /// 一个打开的文件。信号全部归 `scope` 所有，关闭文档时整批回收。
 pub struct Doc {
     /// 文档 id（首次解析的代次），生命周期内不变。
@@ -96,6 +110,8 @@ pub struct Doc {
     pub icon_loading: Signal<bool>,
     /// 最近一次图标渲染请求的序号，见 [`Msg::Icon`]。
     pub icon_req: Cell<u64>,
+    /// 0 或 1 个元素，元素是整条缩略图列表（`host_signal` 只会按 col 排列，整条交给一个子树画成行）。
+    pub icon_thumbs: Signal<Vec<Rc<Vec<IconThumb>>>>,
 
     // ---- 应用名语言 ----
     pub label_locale: Signal<Option<String>>,
@@ -137,6 +153,7 @@ impl Doc {
             icon_index: signal(0),
             icon_loading: signal(false),
             icon_req: Cell::new(0),
+            icon_thumbs: signal(Vec::new()),
             label_locale: signal(None),
             md5: signal(String::new()),
             sha1: signal(String::new()),
@@ -182,6 +199,7 @@ impl Doc {
         self.icon_candidates.set(Vec::new());
         self.icon_index.set(0);
         self.icon_loading.set(false);
+        self.icon_thumbs.set(Vec::new());
         self.label_locale.set(None);
         self.md5.set(String::new());
         self.sha1.set(String::new());
@@ -233,6 +251,8 @@ pub struct AppState {
     pub window_title: Signal<String>,
     pub title_width: Signal<i32>,
     pub sidebar_filter: Signal<String>,
+    /// 概览头「选择设备」选中的目标：(adb 序列号, 显示名)。安装窗口打开时默认只勾它。
+    pub selected_device: Signal<Option<(String, String)>>,
 
     // ---- 设置派生（界面即时跟随）----
     pub enable_hash: Signal<bool>,
@@ -272,6 +292,7 @@ impl AppState {
             window_title: signal(String::from(APP_TITLE)),
             title_width: signal(title_width),
             sidebar_filter: signal(String::new()),
+            selected_device: signal(None),
             enable_hash: signal(enable_hash),
             enable_signature: signal(enable_signature),
             config: Rc::new(RefCell::new(config)),

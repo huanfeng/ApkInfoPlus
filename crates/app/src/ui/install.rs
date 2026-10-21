@@ -199,11 +199,17 @@ pub fn on_devices(state: &AppState, _ctx: &mut EventCtx, result: Result<Vec<AdbD
             ins.devices.set(Vec::new());
             let mut scope = ins.device_scope.borrow_mut();
             scope.dispose();
+            let preferred = state.selected_device.get().map(|(id, _)| id);
             let rows = scope.collect(|| {
                 list.into_iter()
                     .map(|d| {
                         let prev = old.iter().find(|(id, ..)| *id == d.id);
-                        let default_sel = !d.is_offline() && !d.is_unauthorized();
+                        let usable = !d.is_offline() && !d.is_unauthorized();
+                        // 概览头指定了目标设备就只勾它；没指定则勾全部可用的。
+                        let default_sel = match &preferred {
+                            Some(p) => usable && *p == d.id,
+                            None => usable,
+                        };
                         DeviceRow {
                             selected: signal(prev.map(|p| p.1).unwrap_or(default_sel)),
                             phase: signal(prev.and_then(|p| p.2)),

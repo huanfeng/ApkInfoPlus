@@ -61,6 +61,9 @@ text_info = "文本信息"
 activities = "组件"
 
 [field]
+basic_info = "基本信息"
+other_info = "其他信息"
+app_icon = "应用图标"
 file = "文件"
 size = "大小"
 archive_type = "文件类型"
@@ -150,6 +153,8 @@ failed = "重命名失败: {error}"
 
 [install]
 title = "安装到设备"
+pick_device = "选择设备"
+any_device = "不指定设备"
 install_to_device = "安装到设备"
 doc_closed = "要安装的文件已关闭"
 select_device = "选择设备"
