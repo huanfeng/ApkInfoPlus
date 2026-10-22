@@ -3,11 +3,13 @@
 
 mod report;
 mod rules;
+mod update;
 
 pub use report::{analyze, LibReport, MatchSource, SdkGroup};
 pub use rules::{
     normalize_digit_class, Rule, RuleDetail, RuleSet, RulesError, RulesMeta, READER_VERSION,
 };
+pub use update::{update_rules, UpdateOutcome, RULES_ROOT};
 
 /// 构建时内嵌的规则包（`scripts/sync-libchecker-rules.py` 生成）；构建时没有则为空。
 static BUNDLED: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libchecker-rules.zip"));

@@ -153,7 +153,7 @@ pub fn verify_sha1(bytes: &[u8], expected: Option<&str>) -> Result<(), String> {
     }
 }
 
-fn fetch_bytes(
+pub(crate) fn fetch_bytes(
     url: &str,
     cancel: &Arc<AtomicBool>,
     mut progress: impl FnMut(Option<f32>),

@@ -52,6 +52,8 @@ pub enum Msg {
     Devices(Result<Vec<apkinfo_core::adb::AdbDevice>, String>),
     Install(crate::ui::install::InstallMsg),
     Download(apkinfo_core::tools::DownloadEvent),
+    /// 设置里「检查更新」LibChecker 规则的结果：(上游版本, 是否换上了新规则)。
+    RulesUpdate(Result<(u32, bool), String>),
     /// 窗口级快捷键（`App::on_shortcut` 拿不到 ctx，转成消息执行）。
     Shortcut(crate::Shortcut),
 }
@@ -254,6 +256,7 @@ pub struct AppState {
     pub install: crate::ui::install::InstallState,
     pub rename: crate::ui::rename::RenameState,
     pub lib_detail: crate::ui::libs::DetailState,
+    pub rules_update: crate::ui::libs::RulesUpdateState,
     pub download: crate::ui::settings::DownloadState,
 
     // ---- 基础设施 ----
@@ -276,6 +279,7 @@ impl AppState {
             install,
             rename: crate::ui::rename::RenameState::new(),
             lib_detail: crate::ui::libs::DetailState::new(),
+            rules_update: crate::ui::libs::RulesUpdateState::new(),
             download: crate::ui::settings::DownloadState::new(),
             docs: signal(Vec::new()),
             active: signal(Vec::new()),

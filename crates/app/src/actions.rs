@@ -889,6 +889,7 @@ pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
                 }
             }
         }
+        Msg::RulesUpdate(result) => crate::ui::libs::on_rules_update(state, ctx, result),
         Msg::Hashes { gen, result } => {
             let Some(doc) = state.doc_by_gen(gen) else {
                 return;

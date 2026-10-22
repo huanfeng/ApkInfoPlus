@@ -667,7 +667,8 @@ fn build(state: &AppState) -> Element {
                             move || m.with(|s| !s.is_empty())
                         }),
                 ),
-        ));
+        ))
+        .child(super::libs::rules_card(state));
 
     // ---- 关于 ----
     let about = Element::col()

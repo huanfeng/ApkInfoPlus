@@ -12,6 +12,7 @@ use windui::prelude::*;
 use super::{page, section, selectable};
 use crate::state::{AppState, Doc};
 use crate::theme::{CARD_BLUE, CARD_GREEN, CARD_ORANGE, CARD_PURPLE};
+use windui::core::EventCtx;
 
 pub const RULES_HOME: &str = "https://github.com/LibChecker/LibChecker-Rules";
 /// 组件分组里预览几个名字，其余收进「等 N 个」。
@@ -29,6 +30,150 @@ impl DetailState {
         Self {
             show: signal(false),
             view: signal(Vec::new()),
+        }
+    }
+}
+
+/// 设置页「LibChecker 规则」卡片的状态（应用级：设置窗关了再开，进行中的检查还在）。
+#[derive(Clone)]
+pub struct RulesUpdateState {
+    pub running: Signal<bool>,
+    /// 当前规则版本与来源的说明。
+    pub current: Signal<String>,
+    /// 上次检查的结果（成功 / 已是最新 / 失败原因）。
+    pub message: Signal<String>,
+}
+
+impl RulesUpdateState {
+    pub fn new() -> Self {
+        Self {
+            running: signal(false),
+            current: signal(String::new()),
+            message: signal(String::new()),
+        }
+    }
+}
+
+fn current_rules_text() -> String {
+    match crate::libs::current() {
+        Some((r, origin)) => {
+            let origin = match origin {
+                crate::libs::Origin::Bundled => tr!("settings.rules_bundled"),
+                crate::libs::Origin::Downloaded => tr!("settings.rules_downloaded"),
+            };
+            tr!(
+                "settings.rules_current",
+                version = r.meta().data_version as i64,
+                count = r.rules().len() as i64,
+                origin = origin
+            )
+        }
+        None => tr!("settings.rules_none"),
+    }
+}
+
+/// 设置 →「工具」里的规则卡片：当前版本 + 检查更新。
+pub fn rules_card(state: &AppState) -> Element {
+    let ru = state.rules_update.clone();
+    ru.current.set(current_rules_text());
+    let st = state.clone();
+    Element::card(
+        tr!("settings.rules_title"),
+        Element::col()
+            .width_match()
+            .spacing(8)
+            .child(
+                Element::label(ru.current)
+                    .font_size(12.5)
+                    .fg_role(Role::TextMuted)
+                    .width_match(),
+            )
+            .child(
+                Element::row()
+                    .width_match()
+                    .spacing(10)
+                    .cross(Align::Center)
+                    .child(
+                        Element::button(t!("settings.rules_check"))
+                            .small()
+                            .enabled_when({
+                                let running = ru.running;
+                                move || !running.get()
+                            })
+                            .on_click(move |_| start_rules_update(&st)),
+                    )
+                    .child(
+                        Element::label(t!("settings.rules_checking"))
+                            .font_size(12.0)
+                            .fg_role(Role::TextMuted)
+                            .visible_when({
+                                let running = ru.running;
+                                move || running.get()
+                            }),
+                    )
+                    .child(
+                        Element::link("LibChecker-Rules")
+                            .url(RULES_HOME)
+                            .font_size(12.0),
+                    ),
+            )
+            .child(
+                Element::label(ru.message)
+                    .font_size(12.0)
+                    .fg_role(Role::TextMuted)
+                    .width_match()
+                    .visible_when({
+                        let (m, running) = (ru.message, ru.running);
+                        move || !running.get() && m.with(|s| !s.is_empty())
+                    }),
+            ),
+    )
+}
+
+fn start_rules_update(state: &AppState) {
+    let ru = &state.rules_update;
+    if ru.running.get() {
+        return;
+    }
+    ru.running.set(true);
+    ru.message.set(String::new());
+    let tx = state.tx.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(crate::state::Msg::RulesUpdate(crate::libs::check_update()));
+    });
+}
+
+/// 后台检查结束：更新卡片，换了新规则时把已打开的文件重新识别一遍。
+pub fn on_rules_update(state: &AppState, ctx: &mut EventCtx, result: Result<(u32, bool), String>) {
+    let ru = &state.rules_update;
+    ru.running.set(false);
+    ru.current.set(current_rules_text());
+    match result {
+        Ok((v, true)) => {
+            ru.message
+                .set(tr!("settings.rules_updated", version = v as i64));
+            ctx.toast_ok(tr!("settings.rules_updated", version = v as i64));
+            for doc in state.docs.get() {
+                if let Some(info) = doc.current_info() {
+                    doc.libs.set(
+                        crate::libs::analyze(&info)
+                            .map(Rc::new)
+                            .into_iter()
+                            .collect(),
+                    );
+                    // 标签页随 info 重建：原样再写一次，让「库」页和标签标题拿到新结果
+                    doc.info.set(vec![info]);
+                }
+            }
+        }
+        Ok((v, false)) => ru
+            .message
+            .set(tr!("settings.rules_up_to_date", version = v as i64)),
+        Err(e) => {
+            log::warn!("LibChecker 规则更新失败: {e}");
+            ru.message
+                .set(tr!("settings.rules_update_failed", error = e.clone()));
+            ctx.toast_err(tr!("settings.rules_update_failed", error = e));
         }
     }
 }
