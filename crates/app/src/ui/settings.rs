@@ -701,6 +701,29 @@ fn build(state: &AppState) -> Element {
                         .font_size(12.0)
                         .fg_role(Role::TextSubtle),
                 )
+                .children(crate::libs::rules().map(|r| {
+                    Element::row()
+                        .spacing(4)
+                        .cross(Align::Center)
+                        .child(
+                            Element::label(tr!(
+                                "about.rules",
+                                version = r.meta().data_version as i64
+                            ))
+                            .font_size(12.0)
+                            .fg_role(Role::TextSubtle),
+                        )
+                        .child(
+                            Element::link("LibChecker-Rules")
+                                .url(super::libs::RULES_HOME)
+                                .font_size(12.0),
+                        )
+                        .child(
+                            Element::label("(Apache-2.0)")
+                                .font_size(12.0)
+                                .fg_role(Role::TextSubtle),
+                        )
+                }))
                 .child(
                     Element::row()
                         .spacing(6)

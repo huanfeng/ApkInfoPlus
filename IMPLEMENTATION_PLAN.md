@@ -24,7 +24,7 @@
 **Goal**: 原生库 / 组件分组展示、SDK 详情、图标、署名页脚、i18n
 **Success Criteria**: Windows / Linux 实机界面可用
 **Tests**: i18n 完整性测试；实机截图核对
-**Status**: Not Started
+**Status**: Complete（Linux 截图与 Windows 实机截图核对；标签条溢出由 windui 收起文字解决，需 windui 新版）
 
 ## Stage 5: 运行时更新规则
 **Goal**: 设置页「更新规则」、用户目录规则优先、版本比较与回退

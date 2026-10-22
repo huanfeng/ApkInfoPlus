@@ -6,6 +6,7 @@ mod assoc;
 mod config;
 mod i18n_tests;
 mod icons;
+mod libs;
 mod logging;
 mod state;
 mod theme;

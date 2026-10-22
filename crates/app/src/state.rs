@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use apkinfo_core::icon::{IconCandidate, RgbaImage};
 use apkinfo_core::info::{ApkInfo, SignatureInfo};
+use apkinfo_core::libchecker::LibReport;
 use apkinfo_core::load::IconSession;
 use windui::app::ThemeHandle;
 use windui::i18n::LocaleHandle;
@@ -26,6 +27,8 @@ pub enum Msg {
     Parsed {
         gen: u64,
         result: Result<Box<apkinfo_core::load::Loaded>, String>,
+        /// 库识别结果，与解析结果同一线程算好一起送来；没有规则时为 `None`。
+        libs: Option<Box<LibReport>>,
     },
     Icon {
         gen: u64,
@@ -109,6 +112,9 @@ pub struct Doc {
     pub sig_state: Signal<SigState>,
     pub sig_error: Signal<String>,
 
+    /// 库识别结果（0 或 1 个；没有规则时为空）。
+    pub libs: Signal<Vec<Rc<LibReport>>>,
+
     // ---- 界面（每个文档记自己的，切换回来时还在原来的页）----
     pub tab: Signal<usize>,
     pub permission_filter: Signal<String>,
@@ -145,6 +151,7 @@ impl Doc {
             signature: signal(Vec::new()),
             sig_state: signal(SigState::Idle),
             sig_error: signal(String::new()),
+            libs: signal(Vec::new()),
             tab: signal(0),
             permission_filter: signal(String::new()),
             // 占位，下面换成真正收集了信号的那个
@@ -190,6 +197,7 @@ impl Doc {
         self.signature.set(Vec::new());
         self.sig_state.set(SigState::Idle);
         self.sig_error.set(String::new());
+        self.libs.set(Vec::new());
         *self.session.borrow_mut() = None;
     }
 
@@ -245,6 +253,7 @@ pub struct AppState {
     // ---- 对话框 / 子窗口状态 ----
     pub install: crate::ui::install::InstallState,
     pub rename: crate::ui::rename::RenameState,
+    pub lib_detail: crate::ui::libs::DetailState,
     pub download: crate::ui::settings::DownloadState,
 
     // ---- 基础设施 ----
@@ -266,6 +275,7 @@ impl AppState {
         Self {
             install,
             rename: crate::ui::rename::RenameState::new(),
+            lib_detail: crate::ui::libs::DetailState::new(),
             download: crate::ui::settings::DownloadState::new(),
             docs: signal(Vec::new()),
             active: signal(Vec::new()),

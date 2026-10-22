@@ -60,6 +60,7 @@ splits = "分割 APK / OBB"
 signature = "署名"
 hashes = "ハッシュ"
 text_info = "テキスト情報"
+libs = "ライブラリ"
 activities = "コンポーネント"
 
 [field]
@@ -282,6 +283,7 @@ restart_hint = "一部の設定は次にファイルを開いたときに反映�
 description = "軽量でクロスプラットフォームな Android パッケージ情報・インストールツール。"
 license = "MIT ライセンス"
 author = "作者: huanfeng"
+rules = "ライブラリ検出ルール v{version}　提供元"
 
 [status]
 ready = "準備完了 · ファイルをドロップするか Ctrl+O で開く"
@@ -307,3 +309,28 @@ title = "開いているファイル ({count})"
 close_all = "すべて閉じる"
 search = "ファイル名またはパッケージ名で検索…"
 open_count = "{count} 件"
+
+[libs]
+no_native_match = "既知のネイティブライブラリは見つかりませんでした。すべてページ下部に表示しています"
+title = "ライブラリ検出"
+no_rules = "このビルドには LibChecker ルールが同梱されていないため、ライブラリを識別できません。ビルド前に scripts/sync-libchecker-rules.py を実行してください。"
+summary = "{sdks} 個の SDK を検出 · ネイティブライブラリ {native} 個 · コンポーネント {components} 個"
+rules_source = "ルール v{version} · 提供元"
+native_title = "ネイティブライブラリ（{native}）"
+unmatched = "未識別のネイティブライブラリ（{count}）"
+components_title = "SDK コンポーネント"
+no_components = "SDK コンポーネントは検出されませんでした"
+components_footer = "全 {total} 個のコンポーネントのうち {matched} 個を識別"
+and_more = "{names} など計 {count} 個"
+via_action = "action で一致"
+detail_title = "SDK の詳細"
+rule_exact = "ルール: {rule}"
+rule_regex = "ルール（正規表現）: {rule}"
+matched_items = "一致した項目（{count}）"
+contributors = "ルール貢献者: {names}"
+
+[libs.kind]
+activity = "Activity"
+service = "Service"
+receiver = "Receiver"
+provider = "Provider"

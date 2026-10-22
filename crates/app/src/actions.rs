@@ -183,7 +183,13 @@ fn start_parse(state: &AppState, doc: &Rc<Doc>) {
                     .map(Box::new)
                     .map_err(|e| e.to_string())
             });
-            let _ = tx.send(Msg::Parsed { gen, result });
+            let libs = result
+                .as_ref()
+                .ok()
+                .and_then(|l| guarded("库识别", || Ok(crate::libs::analyze(&l.info))).ok())
+                .flatten()
+                .map(Box::new);
+            let _ = tx.send(Msg::Parsed { gen, result, libs });
         });
     }
 
@@ -728,7 +734,12 @@ pub fn open_settings(state: &AppState, ctx: &mut EventCtx) {
 }
 
 /// 把解析结果写进文档（不含图标渲染）。
-pub fn apply_parsed(state: &AppState, doc: &Rc<Doc>, loaded: apkinfo_core::load::Loaded) {
+pub fn apply_parsed(
+    state: &AppState,
+    doc: &Rc<Doc>,
+    loaded: apkinfo_core::load::Loaded,
+    libs: Option<apkinfo_core::libchecker::LibReport>,
+) {
     log::info!(
         "解析完成: {} ({} 个图标候选)",
         loaded.info.meta.package_name.as_deref().unwrap_or("?"),
@@ -746,6 +757,8 @@ pub fn apply_parsed(state: &AppState, doc: &Rc<Doc>, loaded: apkinfo_core::load:
             .clone()
             .unwrap_or_else(|| loaded.info.kind.display_name().to_string()),
     );
+    // 先放库识别结果：标签页随 info 重建时要读它。
+    doc.libs.set(libs.map(Rc::new).into_iter().collect());
     doc.info.set(vec![Rc::new(loaded.info)]);
     state.refresh_entries();
 }
@@ -765,7 +778,8 @@ pub fn load_sync(state: &AppState, path: PathBuf) -> u64 {
     state.add_doc(doc.clone());
     match apkinfo_core::load::load(&path) {
         Ok(loaded) => {
-            apply_parsed(state, &doc, loaded);
+            let libs = crate::libs::analyze(&loaded.info);
+            apply_parsed(state, &doc, loaded, libs);
             let candidates = doc.icon_candidates.get();
             if let Some(session) = doc.session.borrow().clone() {
                 if let Ok(mut s) = session.lock() {
@@ -822,14 +836,14 @@ pub fn load_sync(state: &AppState, path: PathBuf) -> u64 {
 pub fn handle_msg(state: &AppState, ctx: &mut EventCtx, msg: Msg) {
     match msg {
         Msg::OpenPaths(paths) => open_paths(state, ctx, paths),
-        Msg::Parsed { gen, result } => {
+        Msg::Parsed { gen, result, libs } => {
             let Some(doc) = state.doc_by_gen(gen) else {
                 return;
             };
             doc.parsing.set(false);
             match result {
                 Ok(loaded) => {
-                    apply_parsed(state, &doc, *loaded);
+                    apply_parsed(state, &doc, *loaded, libs.map(|b| *b));
                     // 先渲染第一个候选；失败则依次尝试后面的（在 Msg::Icon 里接力）。
                     if doc.icon_candidates.with(|c| !c.is_empty()) {
                         select_icon(state, &doc, 0);

@@ -1,4 +1,4 @@
-//! 标签页：概览 / 权限 / 分包 / 签名 / 哈希 / 文本信息。
+//! 标签页：概览 / 权限 / 库 / 分包 / 签名 / 哈希 / 文本信息。
 //!
 //! 每页都是纯函数 `(state, doc, info) -> Element`，在 `ApkInfo` 变化时整体重建。
 
@@ -16,7 +16,7 @@ use super::{
 use crate::state::{AppState, Doc, HashState, SigState};
 use crate::theme::{CARD_BLUE, CARD_GREEN, CARD_ORANGE, CARD_PURPLE};
 
-/// 标签页下标（归档包多一页「分包 / OBB」）。
+/// 标签页下标（归档包在「库」之后多一页「分包 / OBB」）。
 struct TabIndex {
     splits: Option<usize>,
     signature: usize,
@@ -25,13 +25,13 @@ struct TabIndex {
 fn tab_index(info: &ApkInfo) -> TabIndex {
     if info.is_archive() {
         TabIndex {
-            splits: Some(2),
-            signature: 3,
+            splits: Some(3),
+            signature: 4,
         }
     } else {
         TabIndex {
             splits: None,
-            signature: 2,
+            signature: 3,
         }
     }
 }
@@ -58,6 +58,11 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
             overview(state, &doc, info.clone()),
         ),
         (perm_title, icon("key"), permissions(&doc, info.clone())),
+        (
+            libs_title(&doc),
+            icon("blocks"),
+            super::libs::libs_page(state, &doc, info.clone()),
+        ),
     ];
     if info.is_archive() {
         pages.push((split_title, icon("layers"), splits(state, info.clone())));
@@ -98,6 +103,13 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
                 .corner(super::CARD_CORNER)
                 .border_role(Role::Border, 1),
         )
+}
+
+fn libs_title(doc: &Doc) -> String {
+    match doc.libs.with(|v| v.first().map(|r| r.sdk_count())) {
+        Some(n) if n > 0 => format!("{} ({})", tr!("tab.libs"), n),
+        _ => tr!("tab.libs"),
+    }
 }
 
 fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
