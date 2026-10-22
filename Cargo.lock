@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "apkinfo-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "hex",
  "image",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "apkinfoplus"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "apkinfo-core",
  "dirs",
