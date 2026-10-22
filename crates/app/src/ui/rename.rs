@@ -68,6 +68,22 @@ fn preset(doc: &Doc, which: Preset) -> String {
         Preset::NameOnly => format!("{}{}", label, ext),
         Preset::NameVersion => format!("{}-v{}{}", label, version, ext),
         Preset::PackageVersion => format!("{}-{}{}", package, version, ext),
+        Preset::NameVersionAbi => format!(
+            "{}-v{}-{}{}",
+            label,
+            version,
+            abi_tag(&info.meta.native_codes),
+            ext
+        ),
+    }
+}
+
+/// 文件名里的 ABI 段：多个用 `+` 连接；没有原生库（任何架构都能装）写 `noarch`。
+fn abi_tag(abis: &[String]) -> String {
+    if abis.is_empty() {
+        "noarch".into()
+    } else {
+        actions::sanitize_file_name(&abis.join("+"))
     }
 }
 
@@ -77,6 +93,7 @@ enum Preset {
     NameOnly,
     NameVersion,
     PackageVersion,
+    NameVersionAbi,
 }
 
 pub fn open(state: &AppState, doc: &Doc) {
@@ -196,9 +213,11 @@ pub fn build_dialog(state: &AppState) -> Element {
         .width_match()
         .spacing(12)
         .child(
-            Element::row()
+            // 预设按钮放不下一行时折行（日、韩等语言文案更长）
+            Element::flow()
                 .width_match()
                 .spacing(8)
+                .run_spacing(8)
                 .child(preset_button("rename.default_name", Preset::Default))
                 .child(preset_button("rename.app_name_only", Preset::NameOnly))
                 .child(preset_button(
@@ -208,6 +227,10 @@ pub fn build_dialog(state: &AppState) -> Element {
                 .child(preset_button(
                     "rename.package_with_version",
                     Preset::PackageVersion,
+                ))
+                .child(preset_button(
+                    "rename.name_version_abi",
+                    Preset::NameVersionAbi,
                 )),
         )
         .child(
@@ -257,6 +280,16 @@ pub fn build_dialog(state: &AppState) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn abi_tag_joins_or_marks_noarch() {
+        assert_eq!(abi_tag(&[]), "noarch");
+        assert_eq!(abi_tag(&["arm64-v8a".to_string()]), "arm64-v8a");
+        assert_eq!(
+            abi_tag(&["arm64-v8a".to_string(), "armeabi-v7a".to_string()]),
+            "arm64-v8a+armeabi-v7a"
+        );
+    }
 
     #[test]
     fn validation_rules() {
