@@ -4,6 +4,7 @@
 //! [`model::ApkMeta`] → `apk` 汇总。上层应用只消费 `info::ApkInfo`。
 
 pub mod adb;
+pub mod android;
 pub mod apk;
 pub mod archive;
 pub mod arsc;
