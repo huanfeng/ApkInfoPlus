@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::axml::XmlElement;
-use crate::model::{ActivityInfo, ApkMeta};
+use crate::model::{ActivityInfo, ApkMeta, ComponentInfo, ComponentKind};
 
 /// Java 包名 / 全限定类名格式。用 `[0-9]` 而非 `\d`，与 Dart（JS 风格正则）一样只认 ASCII 数字。
 static PACKAGE_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -98,6 +98,7 @@ pub fn parse_manifest(doc: &XmlElement) -> ApkMeta {
         if meta.application_name.is_none() {
             meta.application_name = guess_class_name(app);
         }
+        meta.components = collect_components(app, meta.package_name.as_deref());
         for activity in &app.children {
             if activity.name != "activity" && activity.name != "activity-alias" {
                 continue;
@@ -113,6 +114,56 @@ pub fn parse_manifest(doc: &XmlElement) -> ApkMeta {
         }
     }
     meta
+}
+
+fn collect_components(app: &XmlElement, package: Option<&str>) -> Vec<ComponentInfo> {
+    let mut out = Vec::new();
+    for el in &app.children {
+        let Some(kind) = ComponentKind::from_element(&el.name) else {
+            continue;
+        };
+        let Some(raw) = el
+            .attr("name")
+            .map(str::to_string)
+            .or_else(|| guess_class_name(el))
+        else {
+            continue;
+        };
+        let name = normalize_component_name(package, raw.trim());
+        if name.is_empty() {
+            continue;
+        }
+        let mut actions: Vec<String> = Vec::new();
+        for filter in el.children_named("intent-filter") {
+            for action in filter.children_named("action") {
+                if let Some(a) = action.attr("name").map(str::trim).filter(|a| !a.is_empty()) {
+                    if !actions.iter().any(|x| x == a) {
+                        actions.push(a.to_string());
+                    }
+                }
+            }
+        }
+        out.push(ComponentInfo {
+            kind,
+            name,
+            exported: el.attr("exported").and_then(|v| match v {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => None,
+            }),
+            actions,
+        });
+    }
+    out
+}
+
+/// 组件名补全：`.Foo` → `包名.Foo`，不含点的 `Foo` → `包名.Foo`（与 PackageParser 一致）。
+fn normalize_component_name(package: Option<&str>, name: &str) -> String {
+    match package {
+        Some(p) if name.starts_with('.') => format!("{p}{name}"),
+        Some(p) if !name.is_empty() && !name.contains('.') => format!("{p}.{name}"),
+        _ => name.to_string(),
+    }
 }
 
 fn supported_screens(screens: &XmlElement) -> Vec<String> {
@@ -333,6 +384,73 @@ mod tests {
             .collect();
         assert_eq!(names, vec![".Main", ".Alias"]);
         assert_eq!(meta.launchable_activities[0].label.as_deref(), Some("Main"));
+    }
+
+    #[test]
+    fn collects_components_with_actions() {
+        let action = |n: &str| el("action", &[("name", n)], vec![]);
+        let m = el(
+            "manifest",
+            &[("package", "com.example")],
+            vec![el(
+                "application",
+                &[],
+                vec![
+                    el("activity", &[("name", ".Main")], vec![launcher_filter()]),
+                    el(
+                        "service",
+                        &[("name", "Sync"), ("exported", "false")],
+                        vec![
+                            el("intent-filter", &[], vec![action("a.X"), action("a.Y")]),
+                            el("intent-filter", &[], vec![action("a.X")]),
+                        ],
+                    ),
+                    el(
+                        "receiver",
+                        &[("name", "com.lib.Push"), ("exported", "true")],
+                        vec![],
+                    ),
+                    el(
+                        "provider",
+                        &[("name", "androidx.startup.InitializationProvider")],
+                        vec![],
+                    ),
+                    el("activity-alias", &[("name", ".Alias")], vec![]),
+                    el("meta-data", &[("name", "k")], vec![]),
+                    el("service", &[], vec![]),
+                ],
+            )],
+        );
+        let meta = parse_manifest(&doc(m));
+        let got: Vec<_> = meta
+            .components
+            .iter()
+            .map(|c| (c.kind, c.name.as_str(), c.exported))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (ComponentKind::Activity, "com.example.Main", None),
+                (ComponentKind::Service, "com.example.Sync", Some(false)),
+                (ComponentKind::Receiver, "com.lib.Push", Some(true)),
+                (
+                    ComponentKind::Provider,
+                    "androidx.startup.InitializationProvider",
+                    None
+                ),
+                (ComponentKind::Activity, "com.example.Alias", None),
+            ]
+        );
+        assert_eq!(
+            meta.components[0].actions,
+            vec!["android.intent.action.MAIN"]
+        );
+        assert_eq!(meta.components[1].actions, vec!["a.X", "a.Y"]);
+        assert_eq!(meta.components[1].short_name(Some("com.example")), "Sync");
+        assert_eq!(
+            meta.components[2].short_name(Some("com.example")),
+            "com.lib.Push"
+        );
     }
 
     #[test]

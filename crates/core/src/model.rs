@@ -35,6 +35,8 @@ pub struct ApkMeta {
     pub densities: Vec<u32>,
 
     pub launchable_activities: Vec<ActivityInfo>,
+    /// `<application>` 下的四类组件（activity-alias 归入 activity），按声明顺序。
+    pub components: Vec<ComponentInfo>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -42,6 +44,47 @@ pub struct ActivityInfo {
     pub name: Option<String>,
     pub label: Option<String>,
     pub icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ComponentKind {
+    Activity,
+    Service,
+    Receiver,
+    Provider,
+}
+
+impl ComponentKind {
+    /// manifest 元素名 → 组件类别；不是组件元素返回 `None`。
+    pub fn from_element(name: &str) -> Option<Self> {
+        match name {
+            "activity" | "activity-alias" => Some(Self::Activity),
+            "service" => Some(Self::Service),
+            "receiver" => Some(Self::Receiver),
+            "provider" => Some(Self::Provider),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentInfo {
+    pub kind: ComponentKind,
+    /// 全限定类名：`.Foo` 与不带点的短名已补全包名。
+    pub name: String,
+    pub exported: Option<bool>,
+    /// intent-filter 里声明的 action，去重保序。
+    pub actions: Vec<String>,
+}
+
+impl ComponentInfo {
+    /// 去掉 `包名.` 前缀后的名字，界面列表用。
+    pub fn short_name<'a>(&'a self, package: Option<&str>) -> &'a str {
+        package
+            .and_then(|p| self.name.strip_prefix(p))
+            .and_then(|rest| rest.strip_prefix('.'))
+            .unwrap_or(&self.name)
+    }
 }
 
 /// 资源表条目的聚合视图（按资源 ID 合并所有 config 变体），供图标渲染器解析引用。

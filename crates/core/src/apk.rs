@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use crate::arsc::ResourceTable;
 use crate::axml;
+use crate::info::{native_libs_from_entries, NativeLib};
 use crate::manifest;
 use crate::model::{ApkMeta, ResourceInfo};
 use crate::zip::{Archive, ReadSeek, ZipError};
@@ -117,6 +118,12 @@ impl ApkReader {
                 None
             }
         }
+    }
+
+    /// `lib/<abi>/*.so` 条目清单。
+    pub fn native_libs(&self) -> Vec<NativeLib> {
+        let mut archive = self.archive.lock().unwrap_or_else(|e| e.into_inner());
+        native_libs_from_entries(archive.file_sizes(), None)
     }
 
     /// 全部文件条目名（不含目录）。

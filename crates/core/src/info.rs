@@ -223,6 +223,43 @@ impl SignatureInfo {
     }
 }
 
+/// APK 内的一个原生库（`lib/<abi>/<name>.so`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeLib {
+    pub abi: String,
+    /// 文件名，不含目录。
+    pub name: String,
+    /// 解压后大小。
+    pub size: u64,
+    /// 来自归档包里的哪个分包；base APK 内的为 `None`。
+    pub source: Option<String>,
+}
+
+/// 从 zip 条目清单挑出原生库，按 ABI、名字排序。
+pub fn native_libs_from_entries(
+    entries: impl IntoIterator<Item = (String, u64)>,
+    source: Option<&str>,
+) -> Vec<NativeLib> {
+    let mut out: Vec<NativeLib> = entries
+        .into_iter()
+        .filter_map(|(path, size)| {
+            let rest = path.strip_prefix("lib/")?;
+            let (abi, name) = rest.split_once('/')?;
+            if abi.is_empty() || name.contains('/') || !name.ends_with(".so") {
+                return None;
+            }
+            Some(NativeLib {
+                abi: abi.to_string(),
+                name: name.to_string(),
+                size,
+                source: source.map(str::to_string),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.abi.cmp(&b.abi).then_with(|| a.name.cmp(&b.name)));
+    out
+}
+
 /// 界面消费的完整信息。由解析线程产出一次，之后只读。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApkInfo {
@@ -245,6 +282,9 @@ pub struct ApkInfo {
     /// 归档包中用于解析的 base APK 条目路径。
     pub base_apk_entry: Option<String>,
 
+    /// 原生库清单（归档包时含 ABI 分包里的）。
+    pub native_libs: Vec<NativeLib>,
+
     /// aapt2 `dump badging` 风格文本。
     pub text_info: String,
 }
@@ -264,6 +304,7 @@ impl ApkInfo {
             obbs: Vec::new(),
             total_size: None,
             base_apk_entry: None,
+            native_libs: Vec::new(),
             text_info,
         }
     }
@@ -499,6 +540,29 @@ pub fn icon_paths_by_dpi_label(paths: &BTreeMap<u32, String>) -> Vec<(String, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_libs_are_filtered_and_sorted() {
+        let entries = [
+            ("lib/x86/libb.so", 2),
+            ("lib/arm64-v8a/liba.so", 1),
+            ("lib/arm64-v8a/sub/libc.so", 3),
+            ("lib/arm64-v8a/readme.txt", 4),
+            ("lib/liba.so", 5),
+            ("assets/lib/x86/libd.so", 6),
+        ]
+        .map(|(n, s)| (n.to_string(), s));
+        let libs = native_libs_from_entries(entries, Some("config.x86.apk"));
+        let got: Vec<_> = libs
+            .iter()
+            .map(|l| (l.abi.as_str(), l.name.as_str(), l.size))
+            .collect();
+        assert_eq!(
+            got,
+            vec![("arm64-v8a", "liba.so", 1), ("x86", "libb.so", 2)]
+        );
+        assert_eq!(libs[0].source.as_deref(), Some("config.x86.apk"));
+    }
 
     #[test]
     fn file_size_formatting() {

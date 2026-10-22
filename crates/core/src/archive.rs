@@ -9,8 +9,8 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::info::{
-    is_abi_token, is_base_split, is_language_token, split_stem, ArchiveKind, ObbEntry, SplitEntry,
-    SplitType,
+    is_abi_token, is_base_split, is_language_token, native_libs_from_entries, split_stem,
+    ArchiveKind, NativeLib, ObbEntry, SplitEntry, SplitType,
 };
 use crate::model::ApkMeta;
 
@@ -159,6 +159,8 @@ pub struct ArchiveContents {
     pub base_bytes: Option<Vec<u8>>,
     /// manifest.icon 或 icon.png 的字节。
     pub icon_bytes: Option<Vec<u8>>,
+    /// ABI 分包里的原生库（base APK 自己的由 `ApkReader::native_libs` 给出）。
+    pub split_native_libs: Vec<NativeLib>,
     /// zip 根目录含 AndroidManifest.xml：其实是改了扩展名的 APK。
     pub is_plain_apk: bool,
 }
@@ -197,6 +199,7 @@ pub fn read_archive(path: &Path) -> Result<ArchiveContents, String> {
             base_entry: None,
             base_bytes: None,
             icon_bytes: None,
+            split_native_libs: Vec::new(),
             is_plain_apk: true,
         });
     }
@@ -233,6 +236,23 @@ pub fn read_archive(path: &Path) -> Result<ArchiveContents, String> {
         icon_bytes = read("icon.png", SMALL);
     }
 
+    // 原生库通常在 ABI 分包里：逐个读进内存列中央目录，用完即丢。
+    let mut split_native_libs = Vec::new();
+    for name in &apk_names {
+        if Some(name) == base_entry.as_ref() || SplitType::from_split_name(name) != SplitType::Abi {
+            continue;
+        }
+        let Some(bytes) = read(name, BASE) else {
+            continue;
+        };
+        match crate::zip::Archive::from_bytes(bytes) {
+            Ok(mut split) => {
+                split_native_libs.extend(native_libs_from_entries(split.file_sizes(), Some(name)))
+            }
+            Err(e) => log::warn!("split {name} unreadable: {e}"),
+        }
+    }
+
     Ok(ArchiveContents {
         manifest,
         apks,
@@ -240,6 +260,7 @@ pub fn read_archive(path: &Path) -> Result<ArchiveContents, String> {
         base_entry,
         base_bytes,
         icon_bytes,
+        split_native_libs,
         is_plain_apk: false,
     })
 }

@@ -8,3 +8,5 @@
 .DS_Store
 # 本机开发用的 cargo 配置（如把 windui 指到本地源码的 [patch]），见 README
 /.cargo/config.toml
+# LibChecker 规则包：构建前由 scripts/sync-libchecker-rules.py 从上游拉取，不入库
+/crates/core/assets/libchecker/

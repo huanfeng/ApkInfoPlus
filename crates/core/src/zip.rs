@@ -73,6 +73,19 @@ impl<R: Read + Seek> Archive<R> {
             .collect()
     }
 
+    /// 全部文件条目的（名字, 解压后大小），只读中央目录、不解压。
+    pub fn file_sizes(&mut self) -> Vec<(String, u64)> {
+        (0..self.inner.len())
+            .filter_map(|i| {
+                let f = self.inner.by_index_raw(i).ok()?;
+                if f.is_dir() {
+                    return None;
+                }
+                Some((f.name().ok()?.into_owned(), f.size()))
+            })
+            .collect()
+    }
+
     /// 解析出实际存在的条目名：精确 → 去前导 `/` → 大小写不敏感。
     /// 混淆或手工打包的 APK 偶尔出现大小写不一致或带前导斜杠的条目名。
     fn resolve_name(&self, name: &str) -> Option<String> {
@@ -198,6 +211,13 @@ mod tests {
         assert_eq!(a.read("androidmanifest.XML").unwrap(), b"mf");
         assert!(a.contains("RES/A.TXT"));
         assert_eq!(a.entry_size("res/a.txt"), Some(5));
+        assert_eq!(
+            a.file_sizes(),
+            vec![
+                ("res/a.txt".to_string(), 5),
+                ("AndroidManifest.xml".to_string(), 2)
+            ]
+        );
         assert!(matches!(a.read("nope"), Err(ZipError::NotFound(_))));
     }
 

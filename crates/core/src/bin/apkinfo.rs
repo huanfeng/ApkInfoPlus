@@ -4,6 +4,7 @@
 //! apkinfo <file.apk>                 # aapt2 dump badging 风格摘要
 //! apkinfo xml <file.apk> [entry]     # 解码二进制 XML（默认 AndroidManifest.xml）
 //! apkinfo res <file.apk>             # 列出资源表全部条目
+//! apkinfo libs <file>                # LibChecker 库识别（需内嵌规则包，APK 与归档包都行）
 //! ```
 
 use std::fmt::Write as _;
@@ -13,8 +14,7 @@ use apkinfo_core::apk::ApkReader;
 use apkinfo_core::axml;
 use apkinfo_core::model::ApkMeta;
 
-const USAGE: &str =
-    "usage:\n  apkinfo <file.apk>\n  apkinfo xml <file.apk> [entry]\n  apkinfo res <file.apk>";
+const USAGE: &str = "usage:\n  apkinfo <file.apk>\n  apkinfo xml <file.apk> [entry]\n  apkinfo res <file.apk>\n  apkinfo libs <file>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -27,7 +27,8 @@ fn main() -> ExitCode {
         ["xml", apk] => cmd_xml(apk, "AndroidManifest.xml"),
         ["xml", apk, entry] => cmd_xml(apk, entry),
         ["res", apk] => cmd_res(apk),
-        [apk] if *apk != "xml" && *apk != "res" => cmd_badging(apk),
+        ["libs", file] => cmd_libs(file),
+        [apk] if !["xml", "res", "libs"].contains(apk) => cmd_badging(apk),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -88,6 +89,73 @@ fn cmd_res(path: &str) -> Result<String, String> {
             info.colors.join(", "),
             refs.join(", ")
         );
+    }
+    Ok(out)
+}
+
+fn cmd_libs(path: &str) -> Result<String, String> {
+    let rules = apkinfo_core::libchecker::bundled().ok_or("no bundled LibChecker rules")?;
+    let loaded = apkinfo_core::load::load(std::path::Path::new(path)).map_err(|e| e.to_string())?;
+    let info = &loaded.info;
+    let report = apkinfo_core::libchecker::analyze(&rules, info);
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "rules: v{} | sdks: {} | native libs: {} | components: {}",
+        report.data_version,
+        report.sdk_count(),
+        info.native_libs.len(),
+        info.meta.components.len()
+    );
+    for g in &report.native {
+        let mut names: Vec<&str> = g
+            .items
+            .iter()
+            .map(|&i| info.native_libs[i].name.as_str())
+            .collect();
+        names.dedup();
+        let abis: std::collections::BTreeSet<&str> = g
+            .items
+            .iter()
+            .map(|&i| info.native_libs[i].abi.as_str())
+            .collect();
+        let _ = writeln!(
+            out,
+            "native  {} [{}] {:?}",
+            g.label,
+            abis.into_iter().collect::<Vec<_>>().join(","),
+            names
+        );
+    }
+    let unmatched: std::collections::BTreeSet<&str> = report
+        .unmatched_native
+        .iter()
+        .map(|&i| info.native_libs[i].name.as_str())
+        .collect();
+    if !unmatched.is_empty() {
+        let _ = writeln!(out, "native  (unmatched) {:?}", unmatched);
+    }
+    let pkg = info.meta.package_name.as_deref();
+    for g in &report.components {
+        let names: Vec<String> = g
+            .items
+            .iter()
+            .zip(&g.sources)
+            .map(|(&i, s)| {
+                let c = &info.meta.components[i];
+                format!(
+                    "{:?}:{}{}",
+                    c.kind,
+                    c.short_name(pkg),
+                    if *s == apkinfo_core::libchecker::MatchSource::Action {
+                        "(action)"
+                    } else {
+                        ""
+                    }
+                )
+            })
+            .collect();
+        let _ = writeln!(out, "comp    {} ({}) {:?}", g.label, g.items.len(), names);
     }
     Ok(out)
 }

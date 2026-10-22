@@ -11,6 +11,7 @@
 - **图标**：位图 / VectorDrawable / adaptive-icon / layer-list / shape 全部渲染，可在多个候选间切换，导出 PNG / SVG / 原始文件
 - **签名证书**：纯 Rust 提取 v1（PKCS#7）与 v2 / v3 / v3.1（APK Signing Block）证书，显示 DN、序列号、有效期、SHA-256 / SHA-1 / MD5 指纹、密钥算法与长度
 - **哈希**：后台流式计算 MD5 / SHA1
+- **库识别**：用 [LibChecker-Rules](https://github.com/LibChecker/LibChecker-Rules) 识别原生库与第三方 SDK 组件（推送、统计、广告、热修复等），按 SDK 分组并附说明与来源链接
 - **adb 安装**：独立安装窗口，多设备、`install` / `install-multiple`、OBB 推送、`-r -d -t -g` 选项、分包勾选、进度日志与取消；概览头可先选好目标设备；可在设置里一键下载 platform-tools
 - **多文件**：拖入 / 命令行 / 再次启动传入的多个文件同时打开，左侧侧栏列出全部（可搜索、单个或全部关闭），各文件记住自己停留的标签页
 - **桌面化交互**：自绘标题栏 + 可拖侧栏 + 概览头卡片 + 带图标标签页，几乎所有字段都可选中复制（右键菜单），文件重命名（预设模板 + 校验），应用名多语言切换，文本信息（aapt2 badging 风格），完整快捷键，单实例（再次打开文件复用窗口）
@@ -62,12 +63,21 @@ windui = { path = "../wind-ui-rust" }   # 相对仓库根目录
 Windows 可执行文件的图标由 `crates/app/build.rs` 在构建时嵌入，
 需要 `rc.exe` / `llvm-rc` / `windres` 之一在 PATH 里，找不到时只是没有图标。
 
+库识别用的 LibChecker 规则不入库，构建前执行一次同步（CI 与 Release 每次都会拉上游最新版）：
+
+```bash
+python3 scripts/sync-libchecker-rules.py      # 生成 crates/core/assets/libchecker/rules.zip，build.rs 内嵌
+```
+
+没有规则包也能编译，只是库识别不可用（构建时会有 warning）。设计与匹配语义见 `docs/libchecker.md`。
+
 需要 Rust 1.85+（edition 2021，工作区使用 `std::sync::LazyLock` 等较新 API）。
 
 ```bash
 cargo build --release -p apkinfoplus          # 桌面应用：target/release/apkinfoplus
 cargo run -p apkinfoplus -- path/to/app.apk   # 直接打开文件
 cargo run -p apkinfo-core --bin apkinfo -- path/to/app.apk   # 命令行查看解析结果（aapt2 badging 风格）
+cargo run -p apkinfo-core --bin apkinfo -- libs path/to/app.apk   # 命令行查看库识别结果
 ```
 
 调试用参数（不写入配置）：`--lang zh-CN` 强制界面语言，`--theme dark|light` 强制主题，
@@ -81,8 +91,9 @@ Linux 运行期依赖：fontconfig（选字）；X11 或 Wayland（设 `WINDUI_B
 crates/core   apkinfo-core：解析核心库（zip / axml / arsc / manifest / icon / signature / adb / installer / tools）+ apkinfo 命令行
 crates/app    apkinfoplus：windui 桌面应用（ui / state / actions / config / i18n）
 packaging/                                                 macOS Info.plist、Linux .desktop
-scripts/                                                   版本号同步与各平台打包脚本（Release 工作流调用）
+scripts/                                                   版本号同步、LibChecker 规则同步与各平台打包脚本
 docs/superpowers/specs/2026-10-21-apkinfoplus-design.md   设计文档
+docs/libchecker.md                                         库识别（LibChecker）设计
 ```
 
 ## 发布
@@ -116,3 +127,7 @@ cargo clippy --workspace --all-targets # 零警告
 ## 许可证
 
 MIT
+
+库识别内嵌的规则数据与图标来自 [LibChecker-Rules](https://github.com/LibChecker/LibChecker-Rules)，
+按 Apache-2.0 分发（发布包内附 `LICENSE-LibChecker-Rules.txt`）；我们只重新打包（合并详情文件、改用压缩），
+不修改规则内容。图标为各厂商商标，仅用于标识对应 SDK。

@@ -12,6 +12,7 @@ pub mod hash;
 pub mod icon;
 pub mod info;
 pub mod installer;
+pub mod libchecker;
 pub mod load;
 pub mod manifest;
 pub mod model;
