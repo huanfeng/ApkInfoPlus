@@ -1,21 +1,55 @@
 # APK Info Plus
 
-轻量跨平台的 Android 安装包信息与安装工具（Windows / macOS / Linux），Rust + [windui](https://github.com/huanfeng/wind-ui-rust) 实现，
-由 Flutter 版 [ApkInfoTool](https://github.com/huanfeng/ApkInfoTool) 重构而来：功能保留，资源占用与原生感按桌面工具的标准重做。
+[![CI](https://github.com/huanfeng/ApkInfoPlus/actions/workflows/ci.yml/badge.svg)](https://github.com/huanfeng/ApkInfoPlus/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/huanfeng/ApkInfoPlus)](https://github.com/huanfeng/ApkInfoPlus/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+轻量、跨平台（Windows / macOS / Linux）的 Android 安装包查看与安装工具。拖一个 APK / XAPK / APKM / APKS 进来，
+包信息、图标、权限、签名证书、用到的第三方 SDK 一眼看全，还能直接装到手机上。
+
+由 Flutter 版 [ApkInfoTool](https://github.com/huanfeng/ApkInfoTool) 用 Rust + [windui](https://github.com/huanfeng/wind-ui-rust) 重写而来：
+功能保留并增强，体积、启动速度与内存占用按原生桌面工具的标准重做。
+
+| 概览（Chrome，浅色） | 库识别（YouTube，深色） |
+|---|---|
+| ![概览](docs/images/overview.png) | ![库识别](docs/images/libraries-dark.png) |
+
+## 亮点
+
+- **解析零依赖**：纯 Rust 解析 AndroidManifest.xml、resources.arsc、签名块与 DEX，不需要 aapt2、apksigner 或 Java；单个可执行文件，Windows 压缩包约 3–4 MB
+- **快**：100–200 MB 的 APK 从打开到解析完成（含 DEX 扫描与库识别）在半秒以内
+- **看得出用了什么 SDK**：基于 [LibChecker-Rules](https://github.com/LibChecker/LibChecker-Rules) 识别原生库、四大组件与 DEX 包里的第三方 SDK（推送、统计、广告、热修复、Jetpack 等），还能看出 Kotlin / Jetpack Compose / 加固
+- **装得上**：多设备、多分包、OBB 一起推，失败原因直接给出；没装 adb 时可在设置里一键下载 platform-tools
+- **原生桌面体验**：多文件侧栏、几乎所有字段可选中复制、完整快捷键、单实例、浅色 / 深色主题、6 种界面语言即时切换
 
 ## 功能
 
-- **拖进来就看**：APK / XAPK / APKM / APKS（以及装着 APK 的 .zip）的包名、版本、SDK、权限、硬件特性、屏幕尺寸与密度、ABI、语言列表、启动 Activity
-- **内置解析引擎**：纯 Rust 解析二进制 AndroidManifest.xml 与 resources.arsc，含混淆 APK 容错，不依赖 aapt2 / Java
-- **归档包**：读取 manifest.json，列出分包（按基础 / 语言 / ABI / 密度分类）与 OBB，base APK 同样走内置引擎
-- **图标**：位图 / VectorDrawable / adaptive-icon / layer-list / shape 全部渲染，可在多个候选间切换，导出 PNG / SVG / 原始文件
-- **签名证书**：纯 Rust 提取 v1（PKCS#7）与 v2 / v3 / v3.1（APK Signing Block）证书，显示 DN、序列号、有效期、SHA-256 / SHA-1 / MD5 指纹、密钥算法与长度
-- **哈希**：后台流式计算 MD5 / SHA1
-- **库识别**：用 [LibChecker-Rules](https://github.com/LibChecker/LibChecker-Rules) 识别原生库与第三方 SDK 组件（推送、统计、广告、热修复等），按 SDK 分组并附说明与来源链接
-- **adb 安装**：独立安装窗口，多设备、`install` / `install-multiple`、OBB 推送、`-r -d -t -g` 选项、分包勾选、进度日志与取消；概览头可先选好目标设备；可在设置里一键下载 platform-tools
-- **多文件**：拖入 / 命令行 / 再次启动传入的多个文件同时打开，左侧侧栏列出全部（可搜索、单个或全部关闭），各文件记住自己停留的标签页
-- **桌面化交互**：自绘标题栏 + 可拖侧栏 + 概览头卡片 + 带图标标签页，几乎所有字段都可选中复制（右键菜单），文件重命名（预设模板 + 校验），应用名多语言切换，文本信息（aapt2 badging 风格），完整快捷键，单实例（再次打开文件复用窗口）
-- **外观**：浅色 / 深色 / 跟随系统，自定义强调色；界面语言 zh-CN / zh-TW / zh-HK / en / ja / ko
+**包信息**
+- APK / XAPK / APKM / APKS（以及装着 APK 的 .zip）：包名、版本、SDK、权限、硬件特性、屏幕尺寸与密度、ABI、语言列表、启动 Activity
+- 归档包读取 manifest.json，列出分包（按基础 / 语言 / ABI / 密度分类）与 OBB
+- 混淆 APK 容错；应用名可在各语言之间切换；「文本信息」页提供 aapt2 `dump badging` 风格的输出
+
+**图标**
+- 位图 / VectorDrawable / adaptive-icon / layer-list / shape 全部渲染，多个候选间切换，导出 PNG / SVG / 原始文件
+
+**签名与校验**
+- v1（PKCS#7）与 v2 / v3 / v3.1（APK Signing Block）证书：DN、序列号、有效期、SHA-256 / SHA-1 / MD5 指纹、密钥算法与长度
+- 后台流式计算文件 MD5 / SHA1
+
+**库识别**
+- 原生库：按 SDK 分组，显示厂商图标、库名与 ABI；未识别的库单独列出并给出大小
+- 组件：Activity / Service / Receiver / Provider 按名字或 intent-filter action 命中
+- DEX：扫描 `classes*.dex` 定义的类，按包名前缀识别 SDK
+- 点开任一 SDK 可看描述、开发团队、来源链接与规则贡献者；规则可在设置里在线更新，设计见 [docs/libchecker.md](docs/libchecker.md)
+
+**安装（adb）**
+- 独立安装窗口：多设备、`install` / `install-multiple`、OBB 推送、`-r -d -t -g` 选项、分包勾选、进度日志与取消
+
+**日常使用**
+- 拖入 / 命令行 / 再次启动传入的多个文件同时打开，侧栏可搜索、单个或全部关闭，各文件记住停留的标签页
+- 文件重命名（预设模板 + 非法字符与同名校验）、复制路径、在文件管理器中显示
+- Windows / Linux 可在设置里注册文件关联；macOS 由 .app 声明文档类型
+- 界面语言 简体中文 / 繁體中文（台灣、香港）/ English / 日本語 / 한국어，切换即时生效
 
 ## 安装
 
@@ -34,9 +68,6 @@ scoop bucket add huanfeng https://github.com/huanfeng/scoop-bucket
 scoop install apkinfoplus
 ```
 
-macOS 版只做了 ad-hoc 签名，没有经过 Apple 公证：第一次打开时在 Finder 里右键「打开」，
-或执行 `xattr -dr com.apple.quarantine "/Applications/APK Info Plus.app"`。
-
 ## 快捷键
 
 | 键 | 作用 |
@@ -49,6 +80,16 @@ macOS 版只做了 ad-hoc 签名，没有经过 Apple 公证：第一次打开�
 | Ctrl+Tab / Ctrl+Shift+Tab | 切换文件 |
 | Ctrl+, | 设置 |
 | Esc | 关闭对话框 / 退出 |
+
+## 常见问题
+
+- **macOS 提示「无法打开」**：dmg 只做了 ad-hoc 签名、未经 Apple 公证。第一次在 Finder 里右键「打开」，
+  或执行 `xattr -dr com.apple.quarantine "/Applications/APK Info Plus.app"`。
+- **Linux 运行依赖**：fontconfig（选字）与 X11 或 Wayland（设 `WINDUI_BACKEND=wayland`），不需要 GTK。
+  AppImage 在 Ubuntu 22.04 上构建，需要 glibc 2.35 或更新。
+- **安装时找不到设备**：需要 adb。设置 →「工具」里可以选系统 PATH 中的 adb、自定义路径，或一键下载 platform-tools。
+- **库识别没结果**：自己从源码构建时要先同步规则（见下文「构建」）；也可以在设置 →「工具」里点「检查更新」下载规则。
+  只能识别规则库收录的 SDK，被混淆改名的库识别不出来。
 
 ## 构建
 
@@ -83,8 +124,6 @@ cargo run -p apkinfo-core --bin apkinfo -- libs path/to/app.apk   # 命令行查
 调试用参数（不写入配置）：`--lang zh-CN` 强制界面语言，`--theme dark|light` 强制主题，
 `--screenshot out.png [--click X Y]` 离屏渲染一帧（windui 提供，用于视觉回归）。
 
-Linux 运行期依赖：fontconfig（选字）；X11 或 Wayland（设 `WINDUI_BACKEND=wayland`）。无需 GTK。
-
 ## 仓库结构
 
 ```
@@ -94,6 +133,7 @@ packaging/                                                 macOS Info.plist、Li
 scripts/                                                   版本号同步、LibChecker 规则同步与各平台打包脚本
 docs/superpowers/specs/2026-10-21-apkinfoplus-design.md   设计文档
 docs/libchecker.md                                         库识别（LibChecker）设计
+docs/images/                                               README 截图
 ```
 
 ## 发布
@@ -124,9 +164,12 @@ cargo clippy --workspace --all-targets # 零警告
 - 重命名会拒绝非法字符与同名覆盖；导出文件名跟随当前选择的应用名语言。
 - SVG 导出的 clip-path 真正生效。
 
-## 许可证
+## 致谢与许可证
 
-MIT
+本项目以 MIT 许可证发布。
+
+- 界面基于作者的 [windui](https://github.com/huanfeng/wind-ui-rust)
+- 库识别的思路与规则来自 [LibChecker](https://github.com/LibChecker/LibChecker)
 
 库识别内嵌的规则数据与图标来自 [LibChecker-Rules](https://github.com/LibChecker/LibChecker-Rules)，
 按 Apache-2.0 分发（发布包内附 `LICENSE-LibChecker-Rules.txt`）；我们只重新打包（合并详情文件、改用压缩），
