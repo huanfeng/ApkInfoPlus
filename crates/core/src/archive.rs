@@ -167,7 +167,8 @@ pub struct ArchiveContents {
 
 pub fn read_archive(path: &Path) -> Result<ArchiveContents, String> {
     let file = File::open(path).map_err(|e| e.to_string())?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let mut zip =
+        crate::zip::open_archive(std::io::BufReader::new(file)).map_err(|e| e.to_string())?;
     let mut apks = Vec::new();
     let mut obbs = Vec::new();
     let mut is_plain_apk = false;

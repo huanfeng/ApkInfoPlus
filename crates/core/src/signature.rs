@@ -50,7 +50,7 @@ pub fn parse_file(path: &Path) -> Result<SignatureInfo, String> {
 
     // ---- v1：META-INF/*.RSA|DSA|EC ----
     f.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
-    match zip::ZipArchive::new(f) {
+    match crate::zip::open_archive(std::io::BufReader::new(f)) {
         Ok(mut zip) => {
             let names: Vec<String> = zip
                 .file_names()

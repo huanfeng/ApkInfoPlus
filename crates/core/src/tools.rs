@@ -282,7 +282,7 @@ fn resolve_relative(base: &str, rel: &str) -> String {
 
 fn extract_platform_tools(bytes: &[u8], dir: &Path) -> Result<(), String> {
     let cursor = io::Cursor::new(bytes);
-    let mut zip = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+    let mut zip = crate::zip::open_archive(cursor).map_err(|e| e.to_string())?;
     // 先解到旁边的临时目录，全部成功后再替换：中途失败不会留下半套 platform-tools。
     let final_target = dir.join("platform-tools");
     let target = dir.join(format!("platform-tools.tmp-{}", std::process::id()));

@@ -54,7 +54,7 @@ impl Archive<Cursor<Vec<u8>>> {
 impl<R: Read + Seek> Archive<R> {
     pub fn new(reader: R) -> Result<Self, ZipError> {
         Ok(Self {
-            inner: zip::ZipArchive::new(reader)?,
+            inner: open_archive(reader)?,
             lower_names: std::cell::OnceCell::new(),
         })
     }
@@ -173,6 +173,48 @@ impl<R: Read + Seek> Archive<R> {
     }
 }
 
+/// 打开 zip，替代 `zip::ZipArchive::new`。
+///
+/// zip 9 默认 `ArchiveOffset::Detect`：为了支持前面拼了数据的 zip，会在文件里大范围扫描
+/// 中央目录签名，200MB 的 APK 要几十万次 read/seek、一秒多。APK 与常见归档的起点都是 0，
+/// 这里先看 EOCD 记的中央目录偏移处是不是中央目录头：是就按 `Known(0)` 直接读，
+/// 不是（带注释、zip64、前置数据等）再交给 `Detect`，行为与原来一致。
+pub fn open_archive<R: Read + Seek>(mut reader: R) -> zip::result::ZipResult<zip::ZipArchive<R>> {
+    use zip::read::{ArchiveOffset, Config};
+    let archive_offset = if starts_at_zero(&mut reader).unwrap_or(false) {
+        ArchiveOffset::Known(0)
+    } else {
+        ArchiveOffset::Detect
+    };
+    reader.seek(std::io::SeekFrom::Start(0))?;
+    zip::ZipArchive::with_config(Config { archive_offset }, reader)
+}
+
+/// 无注释的 EOCD（文件末尾 22 字节）指向的偏移处恰好是中央目录头签名。
+fn starts_at_zero<R: Read + Seek>(r: &mut R) -> std::io::Result<bool> {
+    use std::io::SeekFrom;
+    const EOCD: u32 = 0x0605_4b50;
+    const CDFH: u32 = 0x0201_4b50;
+    if r.seek(SeekFrom::End(0))? < 22 {
+        return Ok(false);
+    }
+    r.seek(SeekFrom::End(-22))?;
+    let mut eocd = [0u8; 22];
+    r.read_exact(&mut eocd)?;
+    let le = |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    if le(&eocd[0..4]) != EOCD {
+        return Ok(false);
+    }
+    let cd_offset = le(&eocd[16..20]);
+    if cd_offset == u32::MAX {
+        return Ok(false); // zip64
+    }
+    r.seek(SeekFrom::Start(cd_offset as u64))?;
+    let mut sig = [0u8; 4];
+    r.read_exact(&mut sig)?;
+    Ok(le(&sig) == CDFH)
+}
+
 fn has_parent_component(p: &Path) -> bool {
     // 条目名可能用反斜杠分隔（Windows 打包工具），统一按两种分隔符检查
     p.components().any(|c| matches!(c, Component::ParentDir))
@@ -219,6 +261,34 @@ mod tests {
             ]
         );
         assert!(matches!(a.read("nope"), Err(ZipError::NotFound(_))));
+    }
+
+    #[test]
+    fn open_archive_handles_prefix_and_comment() {
+        let plain = make_zip();
+        let mut c = Cursor::new(plain.clone());
+        assert!(starts_at_zero(&mut c).unwrap());
+        // 前面拼了数据（自解压包那种）：EOCD 记的偏移不再指向中央目录，回退到 Detect 仍能打开
+        let mut prefixed = b"junk-prefix".to_vec();
+        prefixed.extend_from_slice(&plain);
+        let mut c = Cursor::new(prefixed.clone());
+        assert!(!starts_at_zero(&mut c).unwrap());
+        let mut a = Archive::from_bytes(prefixed).unwrap();
+        assert_eq!(a.read("res/a.txt").unwrap(), b"hello");
+        // 带注释：末尾 22 字节不是 EOCD，同样走 Detect
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut w = zip::ZipWriter::new(&mut buf);
+            w.set_comment("note").unwrap();
+            w.start_file("x", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(b"1").unwrap();
+            w.finish().unwrap();
+        }
+        let bytes = buf.into_inner();
+        assert!(!starts_at_zero(&mut Cursor::new(bytes.clone())).unwrap());
+        assert_eq!(Archive::from_bytes(bytes).unwrap().read("x").unwrap(), b"1");
+        assert!(!starts_at_zero(&mut Cursor::new(vec![0u8; 5])).unwrap());
     }
 
     #[test]
