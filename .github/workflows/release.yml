@@ -1,6 +1,7 @@
 name: Release
 
 # 推送 v* 标签：三平台构建打包 → 创建 GitHub Release → 通知 scoop bucket 更新。
+# 构建前从上游同步 LibChecker 规则，发版即带当时最新的一版（LIBCHECKER_RULES_VERSION 可固定版本）。
 # scoop 一步需要仓库 Secret SCOOP_BUCKET_GITHUB_TOKEN（能向 huanfeng/scoop-bucket 发 dispatch）。
 on:
   push:
@@ -31,6 +32,8 @@ jobs:
           V="${{ inputs.version }}"; [ -n "$V" ] || V="${GITHUB_REF_NAME#v}"
           python scripts/set-version.py "$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: 同步 LibChecker 规则
+        run: python scripts/sync-libchecker-rules.py
       - name: 构建
         run: cargo build --release -p apkinfoplus
         env:
@@ -41,6 +44,7 @@ jobs:
           $v = "${{ steps.ver.outputs.version }}"
           New-Item -ItemType Directory -Force dist, stage | Out-Null
           Copy-Item target/release/apkinfoplus.exe, LICENSE, README.md stage/
+          Copy-Item crates/core/assets/libchecker/LICENSE stage/LICENSE-LibChecker-Rules.txt
           Compress-Archive -Path stage/* -DestinationPath "dist/ApkInfoPlus-$v-windows-x86_64.zip"
       - uses: actions/upload-artifact@v4
         with:
@@ -60,6 +64,8 @@ jobs:
           V="${{ inputs.version }}"; [ -n "$V" ] || V="${GITHUB_REF_NAME#v}"
           python3 scripts/set-version.py "$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: 同步 LibChecker 规则
+        run: python3 scripts/sync-libchecker-rules.py
       - name: 构建
         run: cargo build --release -p apkinfoplus
       - name: 打包
@@ -89,6 +95,8 @@ jobs:
           V="${{ inputs.version }}"; [ -n "$V" ] || V="${GITHUB_REF_NAME#v}"
           python3 scripts/set-version.py "$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: 同步 LibChecker 规则
+        run: python3 scripts/sync-libchecker-rules.py
       - name: 构建
         run: |
           cargo build --release -p apkinfoplus --target aarch64-apple-darwin

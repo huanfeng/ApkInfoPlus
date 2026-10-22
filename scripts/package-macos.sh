@@ -17,6 +17,8 @@ lipo -create \
   -output "$APP/Contents/MacOS/apkinfoplus"
 sed "s/@VERSION@/$VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+cp "$ROOT/LICENSE" "$APP/Contents/Resources/"
+cp "$ROOT/crates/core/assets/libchecker/LICENSE" "$APP/Contents/Resources/LICENSE-LibChecker-Rules.txt"
 
 # 图标：源图 256px，iconset 的更大档位由 sips 放大补齐。
 ICONSET="$WORK/AppIcon.iconset"

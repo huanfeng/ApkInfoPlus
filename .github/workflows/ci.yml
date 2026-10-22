@@ -21,6 +21,9 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # 拉上游最新 LibChecker 规则，测试也跑真实规则与上游 fixtures（见 docs/libchecker.md §4）
+      - name: 同步 LibChecker 规则
+        run: python3 scripts/sync-libchecker-rules.py
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
