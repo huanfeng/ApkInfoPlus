@@ -17,15 +17,17 @@ pub const TYPE_SERVICE: u8 = 1;
 pub const TYPE_ACTIVITY: u8 = 2;
 pub const TYPE_RECEIVER: u8 = 3;
 pub const TYPE_PROVIDER: u8 = 4;
+pub const TYPE_DEX: u8 = 5;
 pub const TYPE_ACTION: u8 = 9;
 
-/// 一期支持的规则类型（与上游 tgbot 能力集一致），其余类型加载时过滤掉。
+/// 支持的规则类型：上游 tgbot 的能力集 [0,1,2,3,4,9] 加上 DEX（5），其余类型加载时过滤掉。
 const SUPPORTED_TYPES: &[u8] = &[
     TYPE_NATIVE,
     TYPE_SERVICE,
     TYPE_ACTIVITY,
     TYPE_RECEIVER,
     TYPE_PROVIDER,
+    TYPE_DEX,
     TYPE_ACTION,
 ];
 

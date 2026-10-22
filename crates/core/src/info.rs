@@ -284,6 +284,8 @@ pub struct ApkInfo {
 
     /// 原生库清单（归档包时含 ABI 分包里的）。
     pub native_libs: Vec<NativeLib>,
+    /// `classes*.dex` 汇总（归档包时是 base APK 的）；没有 dex 时为 `None`。
+    pub dex: Option<crate::dex::DexInfo>,
 
     /// aapt2 `dump badging` 风格文本。
     pub text_info: String,
@@ -305,6 +307,7 @@ impl ApkInfo {
             total_size: None,
             base_apk_entry: None,
             native_libs: Vec::new(),
+            dex: None,
             text_info,
         }
     }

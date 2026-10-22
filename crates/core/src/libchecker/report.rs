@@ -3,9 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::rules::{
-    Rule, RuleSet, TYPE_ACTION, TYPE_ACTIVITY, TYPE_NATIVE, TYPE_PROVIDER, TYPE_RECEIVER,
+    Rule, RuleSet, TYPE_ACTION, TYPE_ACTIVITY, TYPE_DEX, TYPE_NATIVE, TYPE_PROVIDER, TYPE_RECEIVER,
     TYPE_SERVICE,
 };
+use crate::dex::DexMarkers;
 use crate::info::ApkInfo;
 use crate::model::{ComponentInfo, ComponentKind};
 
@@ -25,7 +26,8 @@ pub struct SdkGroup {
     pub simple_color_icon: bool,
     /// 组内第一条命中的规则，用来取详情。
     pub rule: Rule,
-    /// 命中项在 `ApkInfo::native_libs` 或 `ApkMeta::components` 里的下标，按出现顺序。
+    /// 命中项的下标，按出现顺序：原生库对应 `ApkInfo::native_libs`，组件对应
+    /// `ApkMeta::components`，DEX 对应 [`LibReport::dex_packages`]。
     pub items: Vec<usize>,
     /// 每个命中项的命中方式，与 `items` 一一对应。
     pub sources: Vec<MatchSource>,
@@ -53,6 +55,12 @@ pub struct LibReport {
     pub unmatched_native: Vec<usize>,
     /// 组件命中，组按组件数降序、label 升序。
     pub components: Vec<SdkGroup>,
+    /// DEX 包名命中（type 5 规则按包名前缀），组按包数降序、label 升序。
+    pub dex: Vec<SdkGroup>,
+    /// DEX 里的全部包名（排序），`dex` 分组的下标指向它。没有 dex 时为空。
+    pub dex_packages: Vec<String>,
+    /// 技术栈 / 加固标记（来自 DEX 与打包元数据）。
+    pub markers: DexMarkers,
 }
 
 impl LibReport {
@@ -61,6 +69,7 @@ impl LibReport {
         self.native
             .iter()
             .chain(&self.components)
+            .chain(&self.dex)
             .map(|g| (g.label.as_str(), g.icon_id.as_deref()))
             .collect::<BTreeSet<_>>()
             .len()
@@ -70,13 +79,14 @@ impl LibReport {
 pub fn analyze(rules: &RuleSet, info: &ApkInfo) -> LibReport {
     let libs = &info.native_libs;
     let lib_names: BTreeSet<&str> = libs.iter().map(|l| l.name.as_str()).collect();
+    let markers = info.dex.as_ref().map(|d| d.markers).unwrap_or_default();
 
     let mut native = Grouper::default();
     let mut unmatched_native = Vec::new();
     for (i, lib) in libs.iter().enumerate() {
         let hit = rules
             .find(TYPE_NATIVE, &lib.name, true)
-            .filter(|_| passes_native_validation(&lib.name, &lib_names));
+            .filter(|_| passes_native_validation(&lib.name, &lib_names, &markers));
         match hit {
             Some(rule) => native.add(rule, i, source_of(rule, &lib.name)),
             None => unmatched_native.push(i),
@@ -87,6 +97,18 @@ pub fn analyze(rules: &RuleSet, info: &ApkInfo) -> LibReport {
     for (i, c) in info.meta.components.iter().enumerate() {
         if let Some((rule, source)) = match_component(rules, c) {
             components.add(rule, i, source);
+        }
+    }
+
+    let dex_packages: Vec<String> = info
+        .dex
+        .as_ref()
+        .map(|d| d.packages.keys().cloned().collect())
+        .unwrap_or_default();
+    let mut dex = Grouper::default();
+    for (i, pkg) in dex_packages.iter().enumerate() {
+        if let Some((rule, source)) = match_package(rules, pkg) {
+            dex.add(rule, i, source);
         }
     }
 
@@ -101,7 +123,28 @@ pub fn analyze(rules: &RuleSet, info: &ApkInfo) -> LibReport {
         }),
         unmatched_native,
         components: components.finish(|g| g.items.len()),
+        dex: dex.finish(|g| g.items.len()),
+        dex_packages,
+        markers,
     }
+}
+
+/// DEX 规则名是包名前缀：包名本身或它的任一上级包精确命中即算（取最长的那个），
+/// 都不中再拿整个包名试正则（上游有 `okhttp3\.(.*)` 这类写法）。
+fn match_package<'r>(rules: &'r RuleSet, pkg: &str) -> Option<(&'r Rule, MatchSource)> {
+    let mut p = pkg;
+    loop {
+        if let Some(rule) = rules.find(TYPE_DEX, p, false) {
+            return Some((rule, MatchSource::Exact));
+        }
+        match p.rfind('.') {
+            Some(i) => p = &p[..i],
+            None => break,
+        }
+    }
+    rules
+        .find(TYPE_DEX, pkg, true)
+        .map(|rule| (rule, MatchSource::Regex))
 }
 
 fn match_component<'r>(rules: &'r RuleSet, c: &ComponentInfo) -> Option<(&'r Rule, MatchSource)> {
@@ -128,13 +171,13 @@ fn source_of(rule: &Rule, name: &str) -> MatchSource {
     }
 }
 
-/// 几个过于常见的库名需要旁证才算命中（见设计文档 §2.4）。
-/// 加固库的旁证要扫 DEX，DEX 扫描完成前一律不命中。
-fn passes_native_validation(name: &str, all: &BTreeSet<&str>) -> bool {
+/// 几个过于常见的库名需要旁证才算命中（见设计文档 §2.4）：加固库要在 DEX 里找到壳类，
+/// `libapp.so` 要有 `libflutter.so` 或 DEX 里的 FlutterInjector，`libmain.so` 要有 `libunity.so`。
+fn passes_native_validation(name: &str, all: &BTreeSet<&str>, dex: &DexMarkers) -> bool {
     match name {
-        "libjiagu.so" | "libjiagu_a64.so" | "libjiagu_x86.so" | "libjiagu_x64.so" => false,
-        "libDexHelper.so" | "libDexHelper-x86.so" | "libdexjni.so" => false,
-        "libapp.so" => all.contains("libflutter.so"),
+        "libjiagu.so" | "libjiagu_a64.so" | "libjiagu_x86.so" | "libjiagu_x64.so" => dex.qihoo,
+        "libDexHelper.so" | "libDexHelper-x86.so" | "libdexjni.so" => dex.secneo,
+        "libapp.so" => all.contains("libflutter.so") || dex.flutter_injector,
         "libmain.so" => all.contains("libunity.so"),
         _ => true,
     }
@@ -229,7 +272,80 @@ mod tests {
             rule(6, TYPE_SERVICE, "com.push.PushService", "Push", false),
             rule(7, TYPE_ACTION, "com.push.action.RECEIVE", "Push", false),
             rule(8, TYPE_ACTIVITY, r"com\.ads\..*", "Ads", true),
+            rule(9, TYPE_DEX, "com.tencent.smtt", "X5", false),
+            rule(10, TYPE_DEX, "com.tencent", "Tencent", false),
+            rule(11, TYPE_DEX, r"okhttp3\.(.*)", "OkHttp", true),
         ])
+    }
+
+    fn with_dex(mut i: ApkInfo, packages: &[&str], markers: DexMarkers) -> ApkInfo {
+        let mut d = crate::dex::DexInfo {
+            dex_count: 1,
+            markers,
+            ..Default::default()
+        };
+        for p in packages {
+            d.packages.insert(p.to_string(), 1);
+        }
+        i.dex = Some(d);
+        i
+    }
+
+    #[test]
+    fn dex_packages_match_longest_prefix_then_regex() {
+        let i = with_dex(
+            info(vec![], vec![]),
+            &[
+                "com.tencent.smtt.sdk",
+                "com.tencent.smtt",
+                "com.tencent.mm.ui",
+                "com.tencentx",
+                "okhttp3",
+                "okhttp3.internal.http",
+            ],
+            DexMarkers::default(),
+        );
+        let r = analyze(&rules(), &i);
+        let got: Vec<_> = r
+            .dex
+            .iter()
+            .map(|g| {
+                let pkgs: Vec<&str> = g
+                    .items
+                    .iter()
+                    .map(|&i| r.dex_packages[i].as_str())
+                    .collect();
+                (g.label.as_str(), pkgs)
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("X5", vec!["com.tencent.smtt", "com.tencent.smtt.sdk"]),
+                ("OkHttp", vec!["okhttp3.internal.http"]),
+                ("Tencent", vec!["com.tencent.mm.ui"]),
+            ]
+        );
+        assert_eq!(r.sdk_count(), 3);
+    }
+
+    #[test]
+    fn packers_and_flutter_validated_by_dex_markers() {
+        let libs = vec![
+            lib("arm64-v8a", "libjiagu.so"),
+            lib("arm64-v8a", "libapp.so"),
+        ];
+        let plain = analyze(&rules(), &info(libs.clone(), vec![]));
+        assert!(plain.native.is_empty(), "无 DEX 旁证时不认");
+        let markers = DexMarkers {
+            qihoo: true,
+            flutter_injector: true,
+            ..Default::default()
+        };
+        let r = analyze(&rules(), &with_dex(info(libs, vec![]), &[], markers));
+        let labels: Vec<_> = r.native.iter().map(|g| g.label.as_str()).collect();
+        assert_eq!(labels, vec!["Flutter", "Jiagu"]);
+        assert!(r.markers.qihoo);
     }
 
     #[test]

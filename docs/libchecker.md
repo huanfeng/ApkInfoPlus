@@ -25,7 +25,7 @@ portable-v5.zip 没有外层目录，内容如下：
 
 规则类型 `type`：0 native、1 service、2 activity、3 receiver、4 provider、5 DEX、6 static、7 permission、8 metadata、9 action。第 48 版共 3048 条：native 1633，activity 599，service 295，provider 173，receiver 145，action 107，DEX 82，static 14。
 
-**支持范围**：一期支持 0–4 和 9，与上游 tgbot 的能力集 `[0,1,2,3,4,9]` 一致。DEX（5）留到 DEX 扫描阶段再做。其余类型按契约要求**过滤掉**，不能挪作他用。
+**支持范围**：0–4、9（与上游 tgbot 的能力集 `[0,1,2,3,4,9]` 一致）加上 DEX（5）。其余类型按契约要求**过滤掉**，不能挪作他用。
 
 ## 2. 匹配语义
 
@@ -44,10 +44,20 @@ portable-v5.zip 没有外层目录，内容如下：
 4. **原生库**：
    - 用 `.so` 文件名（不含路径）匹配 type 0，允许正则。
    - 以下几个库名太常见，命中后还要过一道校验：
-     - `libjiagu*.so`（360 加固）和 `libDexHelper*.so` / `libdexjni.so`（梆梆加固）：需要在 DEX 里找到对应类名才算数。DEX 扫描完成前一律不命中，宁缺毋滥。
-     - `libapp.so`：需要同包里有 `libflutter.so`。原实现还会去 DEX 里找 FlutterInjector，这一步留到 DEX 阶段。
+     - `libjiagu*.so`（360 加固）：需要 DEX 里定义了 `com.qihoo.util.*` 或 `com.tianyu.util.*` 类。
+     - `libDexHelper*.so` / `libdexjni.so`（梆梆加固）：需要 DEX 里定义了 `com.secneo.apkwrapper.*` 类。
+     - `libapp.so`：需要同包里有 `libflutter.so`，或 DEX 里有 `io.flutter.FlutterInjector`。
      - `libmain.so`：需要同包里有 `libunity.so`。
-5. **汇总**：命中结果按 `label + iconId` 分组。原生库统计去重后的库名数、文件数和 ABI 集合；组件按四类分别计数。组之间按命中数降序排列，数量相同时按 label 排序。
+5. **DEX（type 5）**：
+   - 上游 LibChecker 安卓端的 DEX 匹配不在开源代码里（`PackageUtils.getDexList` 只有 `Not implemented`），这里按规则数据的形态自行定义：type 5 规则名都是包名前缀，如 `com.tencent.smtt`、`androidx.lifecycle`。
+   - 对 DEX 里每个定义了类的包，先用包名本身、再逐级用上级包做精确匹配，取最长命中。
+   - 都不中时，用完整包名试正则规则（上游有 8 条，如 `okhttp3\.(.*)`、`kotlin\.(.*)`）。
+   - 一个 SDK 分组里列出命中的全部包，并按包数排序。
+6. **技术栈标记**（与 JS 参考实现一致）：
+   - Kotlin：字符串表里有 `Lkotlin/Metadata;`，或定义了 `kotlin.*` 类，或包里有 `kotlin-tooling-metadata.json` / `META-INF/*.kotlin_module`。
+   - Jetpack Compose：定义了 `androidx.compose.*` 类，或有 `META-INF/androidx.compose.*.version`。
+   - 360 加固 / 梆梆加固：上面的壳类。
+7. **汇总**：命中结果按 `label + iconId` 分组。原生库统计去重后的库名数、文件数和 ABI 集合；组件按四类分别计数。组之间按命中数降序排列，数量相同时按 label 排序。
 
 ## 3. 数据提取（apkinfo-core）
 
@@ -55,6 +65,11 @@ portable-v5.zip 没有外层目录，内容如下：
 - `ApkInfo.native_libs`：`lib/<abi>/<name>.so` 条目，记录 abi、文件名、解压后大小。
   - 对归档包（XAPK/APKM/APKS），除了 base APK，还要读 ABI 分包（`config.arm64_v8a.apk` 等）的目录，因为原生库通常在分包里。
   - 只读分包的 ZIP 中央目录，不解压 .so 文件。
+- `ApkInfo.dex`：`apkinfo_core::dex` 读根目录的 `classes*.dex`，一次只在内存里放一个 dex。
+  - 只读 header、string_ids、type_ids、class_defs，取出每个定义类的描述符，按包名计数，并顺带收上面的标记。不解析代码。
+  - 每次读都做边界检查，坏文件只是少收一部分。
+  - 加载时同步扫描：217MB 的微信输入法（4 个 dex、3 万个类）约 0.2 秒。
+  - 归档包只扫 base APK；特性分包里的 dex 暂不扫。
 - `apkinfo_core::libchecker`：负责规则加载（`RuleSet`）、匹配（`RuleSet::find`），以及对一个 `ApkInfo` 出报告（`analyze`）。纯函数，不碰 UI。
 
 ## 4. 规则如何内置、更新
@@ -102,6 +117,8 @@ portable-v5.zip 没有外层目录，内容如下：
 - **组件区**：
   - 按 SDK 分组，预览前 3 个命中组件（短名），并按类别计数；
   - 未命中的组件不逐条展示，只给数量。
+- **DEX 中的 SDK**：按 SDK 分组，预览前 3 个包并显示包数；底部注明 DEX 文件数、类数和包数。
+- **技术栈**：在顶部摘要里用徽章显示 Kotlin / Jetpack Compose / 加固。
 - **未识别的原生库**：放在页面最后，按库名合并 ABI，显示大小。放在最后是为了不把组件区挤到很下面。
 - **详情**：
   - 点击某个 SDK 弹出详情，内容包括描述、开发团队、来源链接、命中项和规则贡献者。
@@ -120,9 +137,6 @@ portable-v5.zip 没有外层目录，内容如下：
 
 ## 7. 后续阶段（暂不做）
 
-- **DEX 扫描**：读 `classes*.dex` 的 class_defs，取出包名前缀，用来：
-  - 匹配 type 5 规则；
-  - 识别 Kotlin / Compose 技术栈标记；
-  - 完成加固库和 FlutterInjector 的校验。
+- **DEX 进阶**：扫描特性分包里的 dex；在 dex 容器格式（v41）里只读第一个 header。
 - **ELF 分析**：16KB 页对齐、是否 strip、ZIP 对齐。
 - **其他类型规则**：permission / metadata / static。上游 tgbot 也不支持，暂不跟进。

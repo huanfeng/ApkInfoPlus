@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use crate::arsc::ResourceTable;
 use crate::axml;
+use crate::dex::DexInfo;
 use crate::info::{native_libs_from_entries, NativeLib};
 use crate::manifest;
 use crate::model::{ApkMeta, ResourceInfo};
@@ -124,6 +125,33 @@ impl ApkReader {
     pub fn native_libs(&self) -> Vec<NativeLib> {
         let mut archive = self.archive.lock().unwrap_or_else(|e| e.into_inner());
         native_libs_from_entries(archive.file_sizes(), None)
+    }
+
+    /// 扫描根目录的 `classes*.dex`；一个都没有（或都不是合法 dex）时为 `None`。
+    /// 一次只在内存里放一个 dex。
+    pub fn dex_info(&self) -> Option<DexInfo> {
+        let mut info = DexInfo::default();
+        for name in self.files.iter().filter(|n| crate::dex::is_dex_entry(n)) {
+            if let Some(bytes) = self.read_file(name) {
+                if !info.add_dex(&bytes) {
+                    log::warn!("{name} is not a valid dex");
+                }
+            }
+        }
+        if info.dex_count == 0 {
+            return None;
+        }
+        // 打包进 APK 的元数据文件也是旁证：类被混淆 / 裁剪后 DEX 里未必还看得出来
+        let m = &mut info.markers;
+        m.kotlin |= self.files.iter().any(|f| {
+            f == "kotlin-tooling-metadata.json"
+                || (f.starts_with("META-INF/") && f.ends_with(".kotlin_module"))
+        });
+        m.compose |= self.files.iter().any(|f| {
+            f.strip_prefix("META-INF/androidx.compose.")
+                .is_some_and(|r| r.ends_with(".version"))
+        });
+        Some(info)
     }
 
     /// 全部文件条目名（不含目录）。

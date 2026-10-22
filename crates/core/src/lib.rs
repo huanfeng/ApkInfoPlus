@@ -8,6 +8,7 @@ pub mod apk;
 pub mod archive;
 pub mod arsc;
 pub mod axml;
+pub mod dex;
 pub mod hash;
 pub mod icon;
 pub mod info;

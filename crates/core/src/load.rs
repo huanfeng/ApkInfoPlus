@@ -144,6 +144,7 @@ fn finish(
         None => return Err(LoadError::NoManifest),
     };
     let mut native_libs = reader.native_libs();
+    let dex = reader.dex_info();
     // 只留图标解析用得着的条目：drawable / mipmap / color 这几类，以及值里带 res/ 路径或引用的。
     // Chrome 这种带几十种语言的包，全量资源表（每条翻译都是一个 String）要占几十 MB。
     let resources = Arc::new(icon_resources(reader.resources_with(icon_string)));
@@ -201,6 +202,7 @@ fn finish(
         }
     }
     info.native_libs = native_libs;
+    info.dex = dex;
     info.main_icon_path = main_icon_path.clone();
     info.refresh_text_info();
 

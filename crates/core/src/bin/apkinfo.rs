@@ -107,6 +107,16 @@ fn cmd_libs(path: &str) -> Result<String, String> {
         info.native_libs.len(),
         info.meta.components.len()
     );
+    if let Some(d) = &info.dex {
+        let _ = writeln!(
+            out,
+            "dex: {} files, {} classes, {} packages, {:?}",
+            d.dex_count,
+            d.class_count,
+            d.packages.len(),
+            d.markers
+        );
+    }
     for g in &report.native {
         let mut names: Vec<&str> = g
             .items
@@ -156,6 +166,20 @@ fn cmd_libs(path: &str) -> Result<String, String> {
             })
             .collect();
         let _ = writeln!(out, "comp    {} ({}) {:?}", g.label, g.items.len(), names);
+    }
+    for g in &report.dex {
+        let pkgs: Vec<&str> = g
+            .items
+            .iter()
+            .map(|&i| report.dex_packages[i].as_str())
+            .collect();
+        let _ = writeln!(
+            out,
+            "dex     {} ({}) {:?}",
+            g.label,
+            pkgs.len(),
+            &pkgs[..pkgs.len().min(3)]
+        );
     }
     Ok(out)
 }
