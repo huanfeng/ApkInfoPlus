@@ -242,7 +242,7 @@ pub fn field_row_custom(
 
 /// 复制到剪贴板的小图标按钮，带 toast 反馈。
 pub fn copy_button(value: String) -> Element {
-    crate::icons::button("copy", 24, tr!("action.copy")).on_click(move |ctx| {
+    crate::icons::button("copy", 24, t!("action.copy")).on_click(move |ctx| {
         ctx.clipboard_set(&value);
         ctx.toast_ok(tr!("action.copied", content = shorten(&value, 60)));
     })

@@ -20,6 +20,7 @@ pub struct DownloadState {
     pub running: Signal<bool>,
     pub percent: Signal<f32>,
     pub stage: Signal<String>,
+    /// 下载失败的原始错误（空串 = 无错误）；界面用 `t!("settings.download_failed")` 套句子。
     pub message: Signal<String>,
     pub cancel:
         std::rc::Rc<std::cell::RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>>,
@@ -61,8 +62,7 @@ pub fn on_download_event(state: &AppState, ctx: &mut EventCtx, ev: DownloadEvent
         }
         DownloadEvent::Failed(e) => {
             dl.running.set(false);
-            dl.message
-                .set(tr!("settings.download_failed", error = e.clone()));
+            dl.message.set(e.clone());
             ctx.toast_err(tr!("settings.download_failed", error = e));
         }
     }
@@ -89,7 +89,7 @@ pub fn open(state: &AppState, ctx: &mut EventCtx) {
                     }
                 }
             })
-            .content(move || super::window_chrome(tr!("settings.title"), build(&st))),
+            .content(move || super::window_chrome(t!("settings.title"), build(&st))),
     );
 }
 
@@ -112,19 +112,17 @@ struct Watcher {
     /// 上次看到的 `download.changed` 版本号。
     dl_changed: u64,
     locales: Vec<String>,
+    /// 解析出的 adb 路径；空串表示没找到（界面换成 `settings.path_not_found`）。
     resolved: Signal<String>,
-    /// 关于页「基于 windui … · 渲染后端 …」，实际后端只有拿到 ctx 才问得到。
-    framework: Signal<String>,
+    /// 关于页「基于 windui … · 渲染后端 …」里的后端名，只有拿到 ctx 才问得到。
+    renderer_name: Signal<String>,
 }
 
 impl Watcher {
     fn poll(&mut self, state: &AppState, ctx: &mut EventCtx) {
-        if self.framework.with(|f| f.is_empty()) {
-            self.framework.set(tr!(
-                "settings.framework",
-                version = windui::VERSION,
-                renderer = ctx.active_renderer().name()
-            ));
+        if self.renderer_name.with(|f| f.is_empty()) {
+            self.renderer_name
+                .set(ctx.active_renderer().name().to_string());
         }
         if changed(&mut self.renderer) {
             let mode = RendererMode::ALL[self.renderer.0.get().min(2)];
@@ -217,11 +215,11 @@ pub fn apply_theme(state: &AppState) {
     state.theme.set(theme);
 }
 
+/// 解析出的 adb 路径；找不到时返回空串，由界面显示「未找到」（跟随语言）。
 fn resolved_adb_text(state: &AppState) -> String {
-    match crate::tools::resolve_adb(state) {
-        Some(p) => p.display().to_string(),
-        None => tr!("settings.path_not_found"),
-    }
+    crate::tools::resolve_adb(state)
+        .map(|p| p.display().to_string())
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -235,8 +233,8 @@ fn build(state: &AppState) -> Element {
     // ---- 外观 ----
     let locales = state.locale.available();
     let locale_ids: Vec<String> = locales.iter().map(|l| l.id.clone()).collect();
-    let mut lang_options = vec![tr!("settings.language_auto")];
-    lang_options.extend(locales.iter().map(|l| l.name.clone()));
+    let mut lang_options: Vec<TextContent> = vec![t!("settings.language_auto").into()];
+    lang_options.extend(locales.iter().map(|l| l.name.clone().into()));
     let cfg_lang = state.cfg(|c| c.language.clone());
     let lang_idx = if cfg_lang == "auto" {
         0
@@ -250,7 +248,7 @@ fn build(state: &AppState) -> Element {
     let language = signal(lang_idx);
     let theme_mode = signal(state.cfg(|c| c.theme_mode.index()));
     let renderer = signal(state.cfg(|c| c.renderer.index()));
-    let framework = signal(String::new());
+    let renderer_name = signal(String::new());
     let accent_initial = state
         .cfg(|c| c.accent_color)
         .map(Color::hex)
@@ -262,38 +260,38 @@ fn build(state: &AppState) -> Element {
         .width_match()
         .spacing(12)
         .child(Element::card(
-            tr!("settings.appearance"),
+            t!("settings.appearance"),
             Element::col()
                 .width_match()
                 .child(Element::setting_row(
-                    tr!("settings.language"),
+                    t!("settings.language"),
                     Element::dropdown(lang_options, language).width(220),
                 ))
                 .child(Element::setting_row(
-                    tr!("settings.theme_mode"),
+                    t!("settings.theme_mode"),
                     Element::segmented(
                         vec![
-                            tr!("settings.theme_light"),
-                            tr!("settings.theme_dark"),
-                            tr!("settings.theme_system"),
+                            t!("settings.theme_light"),
+                            t!("settings.theme_dark"),
+                            t!("settings.theme_system"),
                         ],
                         theme_mode,
                     ),
                 ))
                 .child(Element::setting_row_desc(
-                    tr!("settings.renderer"),
-                    tr!("settings.renderer_hint"),
+                    t!("settings.renderer"),
+                    t!("settings.renderer_hint"),
                     Element::segmented(
                         vec![
-                            tr!("settings.renderer_auto"),
-                            tr!("settings.renderer_software"),
-                            tr!("settings.renderer_gpu"),
+                            t!("settings.renderer_auto"),
+                            t!("settings.renderer_software"),
+                            t!("settings.renderer_gpu"),
                         ],
                         renderer,
                     ),
                 ))
                 .child(Element::setting_row(
-                    tr!("settings.accent_color"),
+                    t!("settings.accent_color"),
                     Element::row()
                         .spacing(8)
                         .cross(Align::Center)
@@ -317,7 +315,7 @@ fn build(state: &AppState) -> Element {
                         ),
                 ))
                 .child(Element::setting_row(
-                    tr!("settings.title_width"),
+                    t!("settings.title_width"),
                     Element::stepper(title_width, 60.0, 240.0, 10.0).width(140),
                 )),
         ));
@@ -330,12 +328,12 @@ fn build(state: &AppState) -> Element {
         .width_match()
         .spacing(12)
         .child(Element::card(
-            tr!("settings.features"),
+            t!("settings.features"),
             Element::col()
                 .width_match()
                 .child(Element::setting_row_desc(
-                    tr!("settings.enable_signature"),
-                    tr!("settings.enable_signature_desc"),
+                    t!("settings.enable_signature"),
+                    t!("settings.enable_signature_desc"),
                     Element::checkbox("", enable_sig).on_toggle({
                         let st = st.clone();
                         move |_| {
@@ -346,8 +344,8 @@ fn build(state: &AppState) -> Element {
                     }),
                 ))
                 .child(Element::setting_row_desc(
-                    tr!("settings.enable_hash"),
-                    tr!("settings.enable_hash_desc"),
+                    t!("settings.enable_hash"),
+                    t!("settings.enable_hash_desc"),
                     Element::checkbox("", enable_hash).on_toggle({
                         let st = st.clone();
                         move |_| {
@@ -365,13 +363,13 @@ fn build(state: &AppState) -> Element {
         ))
         .child(file_association_card())
         .child(Element::card(
-            tr!("settings.enable_debug"),
+            t!("settings.enable_debug"),
             Element::col()
                 .width_match()
                 .spacing(8)
                 .child(Element::setting_row_desc(
-                    tr!("settings.enable_debug"),
-                    tr!("settings.enable_debug_desc"),
+                    t!("settings.enable_debug"),
+                    t!("settings.enable_debug_desc"),
                     Element::checkbox("", enable_debug).on_toggle({
                         let st = st.clone();
                         move |_| {
@@ -418,8 +416,8 @@ fn build(state: &AppState) -> Element {
     let adb_path = signal(state.cfg(|c| c.adb_path.clone()));
     let resolved = signal(resolved_adb_text(state));
     let download_sources = apkinfo_core::tools::default_download_sources();
-    let mut source_options = vec![tr!("settings.download_source_auto")];
-    source_options.extend(download_sources.iter().map(|s| short_url(s)));
+    let mut source_options: Vec<TextContent> = vec![t!("settings.download_source_auto").into()];
+    source_options.extend(download_sources.iter().map(|s| short_url(s).into()));
     let download_source = signal(0usize);
     let dl = state.download.clone();
     let download_dir_text = signal(state.cfg(|c| c.resolved_download_dir().display().to_string()));
@@ -432,19 +430,19 @@ fn build(state: &AppState) -> Element {
             Element::col()
                 .width_match()
                 .child(Element::setting_row(
-                    tr!("settings.adb_source"),
+                    t!("settings.adb_source"),
                     Element::dropdown(
                         vec![
-                            tr!("settings.tool_source_builtin"),
-                            tr!("settings.tool_source_system"),
-                            tr!("settings.tool_source_custom"),
+                            t!("settings.tool_source_builtin"),
+                            t!("settings.tool_source_system"),
+                            t!("settings.tool_source_custom"),
                         ],
                         adb_source,
                     )
                     .width(220),
                 ))
                 .child(Element::setting_row(
-                    tr!("settings.adb_path"),
+                    t!("settings.adb_path"),
                     Element::row()
                         .spacing(8)
                         .cross(Align::Center)
@@ -469,7 +467,7 @@ fn build(state: &AppState) -> Element {
                         ),
                 ))
                 .child(Element::setting_row(
-                    tr!("settings.resolved_path"),
+                    t!("settings.resolved_path"),
                     Element::row()
                         .spacing(8)
                         .cross(Align::Center)
@@ -479,7 +477,15 @@ fn build(state: &AppState) -> Element {
                                 .fg_role(Role::TextMuted)
                                 .max_lines(1)
                                 .truncate(Truncate::Middle)
-                                .width(300),
+                                .width(300)
+                                .visible_when(move || resolved.with(|s| !s.is_empty())),
+                        )
+                        .child(
+                            Element::label(t!("settings.path_not_found"))
+                                .font_size(12.5)
+                                .fg_role(Role::TextMuted)
+                                .width(300)
+                                .visible_when(move || resolved.with(|s| s.is_empty())),
                         )
                         .child(
                             Element::button(t!("settings.auto_detect"))
@@ -502,16 +508,16 @@ fn build(state: &AppState) -> Element {
                 )),
         ))
         .child(Element::card(
-            tr!("settings.download_platform_tools"),
+            t!("settings.download_platform_tools"),
             Element::col()
                 .width_match()
                 .spacing(6)
                 .child(Element::setting_row(
-                    tr!("settings.download_source"),
+                    t!("settings.download_source"),
                     Element::dropdown(source_options, download_source).width(300),
                 ))
                 .child(Element::setting_row(
-                    tr!("settings.download_dir"),
+                    t!("settings.download_dir"),
                     Element::row()
                         .spacing(8)
                         .cross(Align::Center)
@@ -658,7 +664,7 @@ fn build(state: &AppState) -> Element {
                         }),
                 )
                 .child(
-                    Element::label(dl.message)
+                    Element::label(t!("settings.download_failed", error = dl.message))
                         .font_size(12.0)
                         .fg_role(Role::Danger)
                         .width_match()
@@ -675,7 +681,7 @@ fn build(state: &AppState) -> Element {
         .width_match()
         .spacing(12)
         .child(Element::card(
-            tr!("settings.about"),
+            t!("settings.about"),
             Element::col()
                 .width_match()
                 .spacing(8)
@@ -686,7 +692,7 @@ fn build(state: &AppState) -> Element {
                         .fg_role(Role::Text),
                 )
                 .child(
-                    Element::label(tr!("settings.version", version = env!("CARGO_PKG_VERSION")))
+                    Element::label(t!("settings.version", version = env!("CARGO_PKG_VERSION")))
                         .fg_role(Role::TextMuted),
                 )
                 .child(
@@ -698,16 +704,21 @@ fn build(state: &AppState) -> Element {
                 .child(Element::label(t!("about.license")).fg_role(Role::TextMuted))
                 .child(Element::link(t!("settings.homepage")).url(env!("CARGO_PKG_REPOSITORY")))
                 .child(
-                    Element::label(framework)
-                        .font_size(12.0)
-                        .fg_role(Role::TextSubtle),
+                    Element::label(t!(
+                        "settings.framework",
+                        version = windui::VERSION,
+                        renderer = renderer_name
+                    ))
+                    .font_size(12.0)
+                    .fg_role(Role::TextSubtle)
+                    .visible_when(move || renderer_name.with(|s| !s.is_empty())),
                 )
                 .children(crate::libs::rules().map(|r| {
                     Element::row()
                         .spacing(4)
                         .cross(Align::Center)
                         .child(
-                            Element::label(tr!(
+                            Element::label(t!(
                                 "about.rules",
                                 version = r.meta().data_version as i64
                             ))
@@ -758,7 +769,7 @@ fn build(state: &AppState) -> Element {
             dl_changed: state.download.changed.version(),
             locales: locale_ids,
             resolved,
-            framework,
+            renderer_name,
         })
     });
 
@@ -770,10 +781,10 @@ fn build(state: &AppState) -> Element {
         .child(
             Element::list_pill(
                 vec![
-                    tr!("settings.appearance"),
-                    tr!("settings.features"),
-                    tr!("settings.tools"),
-                    tr!("settings.about"),
+                    t!("settings.appearance"),
+                    t!("settings.features"),
+                    t!("settings.tools"),
+                    t!("settings.about"),
                 ],
                 nav,
             )
@@ -801,14 +812,7 @@ fn build(state: &AppState) -> Element {
 
 /// 「文件关联」卡片：注册 / 取消，以及跳到系统「默认应用」设置（Win10+ 用户选过别的程序时只能去那里改）。
 fn file_association_card() -> Element {
-    let status_text = |on: bool| {
-        if on {
-            tr!("settings.assoc_status_on")
-        } else {
-            tr!("settings.assoc_status_off")
-        }
-    };
-    let status = signal(status_text(crate::assoc::is_registered()));
+    let registered = signal(crate::assoc::is_registered());
     let exts = crate::assoc::EXTENSIONS
         .iter()
         .map(|e| format!(".{}", e))
@@ -821,7 +825,7 @@ fn file_association_card() -> Element {
                 .small()
                 .on_click(move |ctx| match crate::assoc::register() {
                     Ok(()) => {
-                        status.set(status_text(crate::assoc::is_registered()));
+                        registered.set(crate::assoc::is_registered());
                         ctx.toast_ok(tr!("settings.assoc_done"));
                     }
                     Err(e) => ctx.toast_err(e),
@@ -833,7 +837,7 @@ fn file_association_card() -> Element {
                 .neutral()
                 .outline_soft()
                 .on_click(move |ctx| match crate::assoc::unregister() {
-                    Ok(()) => status.set(status_text(crate::assoc::is_registered())),
+                    Ok(()) => registered.set(crate::assoc::is_registered()),
                     Err(e) => ctx.toast_err(e),
                 }),
         );
@@ -855,17 +859,27 @@ fn file_association_card() -> Element {
             .width_match()
             .spacing(8)
             .child(Element::setting_row_desc(
-                tr!("settings.assoc_types"),
-                tr!("settings.assoc_desc"),
+                t!("settings.assoc_types"),
+                t!("settings.assoc_desc"),
                 Element::label(exts)
                     .font_size(13.0)
                     .fg_role(Role::TextMuted),
             ))
             .child(Element::setting_row(
-                tr!("settings.assoc_status"),
-                Element::label(status)
-                    .font_size(13.0)
-                    .fg_role(Role::TextMuted),
+                t!("settings.assoc_status"),
+                Element::row()
+                    .child(
+                        Element::label(t!("settings.assoc_status_on"))
+                            .font_size(13.0)
+                            .fg_role(Role::TextMuted)
+                            .visible_when(move || registered.get()),
+                    )
+                    .child(
+                        Element::label(t!("settings.assoc_status_off"))
+                            .font_size(13.0)
+                            .fg_role(Role::TextMuted)
+                            .visible_when(move || !registered.get()),
+                    ),
             ))
             .child(buttons)
     } else {
@@ -875,7 +889,7 @@ fn file_association_card() -> Element {
                 .fg_role(Role::TextMuted),
         )
     };
-    Element::card(tr!("settings.file_association"), body)
+    Element::card(t!("settings.file_association"), body)
 }
 
 fn short_url(url: &str) -> String {
@@ -915,4 +929,107 @@ fn start_download(state: &AppState, source_index: usize, sources: &[String]) {
             let _ = tx.send(Msg::Download(ev));
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use windui::geometry::{Rect, Size};
+    use windui::render::{Canvas, Fit, Image, Paint};
+
+    /// 只记下画过哪些字的画布。
+    #[derive(Default)]
+    struct TextCanvas {
+        texts: RefCell<Vec<String>>,
+    }
+
+    impl Canvas for TextCanvas {
+        fn dpi_scale(&self) -> f32 {
+            1.0
+        }
+        fn fill_rect(&mut self, _: f32, _: f32, _: f32, _: f32, _: &Paint) {}
+        fn fill_round_rect(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: &Paint) {}
+        fn stroke_round_rect(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: &Paint) {
+        }
+        fn draw_line(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: &Paint) {}
+        fn fill_circle(&mut self, _: f32, _: f32, _: f32, _: &Paint) {}
+        fn draw_shadow(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: Color) {}
+        fn draw_image(&mut self, _: &Image, _: Rect, _: Fit, _: f32, _: f32) {}
+        fn draw_text(
+            &mut self,
+            text: &str,
+            _: Rect,
+            _: Color,
+            _: Align,
+            _: &windui::text::TextStyle,
+        ) {
+            self.texts.borrow_mut().push(text.to_string());
+        }
+        fn measure_text(&mut self, _: &str, _: &windui::text::TextStyle) -> Size {
+            Size::ZERO
+        }
+        fn push_layer(&mut self, _: f32) {}
+        fn pop_layer(&mut self) {}
+        fn save(&mut self) {}
+        fn restore(&mut self) {}
+        fn clip_rect(&mut self, _: Rect) {}
+    }
+
+    /// 设置窗的标题栏 + 「文件关联」卡片（卡片标题、设置项、状态文案、按钮）：**同一棵树**
+    /// 换语言后再画一帧，画出的全是新语言，旧语言一个字不剩。构建期用 `tr!` 定格的文案
+    /// 过不了这一关（重建树才能变）。整页 `build` 要 `AppState`，而后者的 `Sender` 在测试里
+    /// 造不出来，所以挑不依赖状态的这一块做代表。
+    #[test]
+    fn settings_follow_language_switch() {
+        windui::i18n::install(
+            Locales::builder()
+                .embed(include_str!("../../i18n/zh-CN.toml"))
+                .embed(include_str!("../../i18n/en.toml"))
+                .fallback("en")
+                .initial(Initial::Fixed("zh-CN".into()))
+                .build(),
+        );
+        let locale = LocaleHandle::new();
+        let mut tree = windui::core::Tree::new();
+        let ui = super::super::window_chrome(t!("settings.title"), file_association_card());
+        let root = ui.build(&mut tree);
+        tree.root = Some(root);
+        let paint = |tree: &mut windui::core::Tree| {
+            tree.layout_root(Size::new(760, 600), &mut windui::text::NullTextEngine);
+            let mut cv = TextCanvas::default();
+            tree.paint(&mut cv);
+            cv.texts.into_inner()
+        };
+        let has = |texts: &[String], s: &str| texts.iter().any(|t| t == s);
+
+        let zh = paint(&mut tree);
+        for want in [
+            "设置",
+            "文件关联",
+            "文件类型",
+            "状态",
+            "关联到本程序",
+            "取消关联",
+        ] {
+            assert!(has(&zh, want), "中文界面缺「{want}」: {zh:?}");
+        }
+        assert!(has(&zh, "已关联到本程序") || has(&zh, "未关联"), "{zh:?}");
+
+        assert!(locale.set("en"));
+        let en = paint(&mut tree);
+        for want in ["Settings", "File association", "File types", "Status"] {
+            assert!(has(&en, want), "英文界面缺「{want}」: {en:?}");
+        }
+        assert!(
+            has(&en, "Associated with this app") || has(&en, "Not associated"),
+            "{en:?}"
+        );
+        for stale in zh
+            .iter()
+            .filter(|t| t.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)))
+        {
+            assert!(!has(&en, stale), "换语言后仍残留「{stale}」: {en:?}");
+        }
+    }
 }

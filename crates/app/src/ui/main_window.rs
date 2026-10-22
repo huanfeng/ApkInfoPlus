@@ -116,22 +116,34 @@ fn sidebar(state: &AppState) -> Element {
         .padding_edges(Insets::new(8, 8, 8, 4))
         .spacing(2)
         .child(
-            nav_item("folder_open", tr!("sidebar.open_file"), Some("Ctrl+O")).on_click({
+            nav_item(
+                "folder_open",
+                t!("sidebar.open_file"),
+                t!("sidebar.open_file_tooltip"),
+            )
+            .on_click({
                 let st = st.clone();
                 move |ctx| actions::pick_file(&st, ctx)
             }),
         )
-        .child(nav_item("history", tr!("sidebar.recent"), None).on_click({
-            let st = st.clone();
-            move |ctx| {
-                let items = actions::recent_menu_items(&st);
-                let mut req = windui::event::MenuRequest::below(ctx.bounds(), items);
-                req.click_through = false;
-                ctx.show_menu_request(req);
-            }
-        }))
         .child(
-            nav_item("settings", tr!("action.settings"), Some("Ctrl+,")).on_click({
+            nav_item("history", t!("sidebar.recent"), t!("sidebar.recent")).on_click({
+                let st = st.clone();
+                move |ctx| {
+                    let items = actions::recent_menu_items(&st);
+                    let mut req = windui::event::MenuRequest::below(ctx.bounds(), items);
+                    req.click_through = false;
+                    ctx.show_menu_request(req);
+                }
+            }),
+        )
+        .child(
+            nav_item(
+                "settings",
+                t!("action.settings"),
+                t!("action.settings_tooltip"),
+            )
+            .on_click({
                 let st = st.clone();
                 move |ctx| actions::open_settings(&st, ctx)
             }),
@@ -142,16 +154,17 @@ fn sidebar(state: &AppState) -> Element {
         .cross(Align::Center)
         .padding_edges(Insets::new(16, 8, 10, 2))
         .child(
-            Element::label(Signal::map(docs, |v| {
-                tr!("sidebar.title", count = v.len() as i64)
-            }))
+            Element::label(t!(
+                "sidebar.title",
+                count = Signal::map(docs, |v| v.len() as i64)
+            ))
             .font_size(12.5)
             .font_weight(600)
             .fg_role(Role::TextMuted)
             .weight(1.0),
         )
         .child(
-            icons::button("close_all", 24, tr!("sidebar.close_all"))
+            icons::button("close_all", 24, t!("sidebar.close_all"))
                 .enabled_when(move || docs.with(|v| !v.is_empty()))
                 .on_click({
                     let st = st.clone();
@@ -194,12 +207,8 @@ fn sidebar(state: &AppState) -> Element {
         .child(card)
 }
 
-/// 侧栏导航项：图标 + 文字的扁平行；快捷键只在悬停提示里出现，不占行宽。
-fn nav_item(icon: &str, label: String, shortcut: Option<&str>) -> Element {
-    let tip = match shortcut {
-        Some(k) => format!("{} ({})", label, k),
-        None => label.clone(),
-    };
+/// 侧栏导航项：图标 + 文字的扁平行；快捷键只在悬停提示（`tip`）里出现，不占行宽。
+fn nav_item(icon: &str, label: windui::i18n::Message, tip: windui::i18n::Message) -> Element {
     Element::row()
         .width_match()
         .cross(Align::Center)
@@ -242,6 +251,16 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
         }
         None => (file_name.clone(), doc.subtitle.get()),
     };
+    // 解析中 / 失败的状态文案走 t!：行只在条目变化时重建，换语言时要靠它跟随。
+    let subtitle_text: TextContent = if info.is_some() {
+        subtitle.clone().into()
+    } else if doc.parsing.get() {
+        t!("parse.parsing").into()
+    } else if doc.parse_error.with(|e| !e.is_empty()) {
+        t!("parse.failed").into()
+    } else {
+        subtitle.clone().into()
+    };
     let package = info
         .as_ref()
         .and_then(|i| i.meta.package_name.clone())
@@ -283,7 +302,7 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
                 .width_match(),
         )
         .child(
-            Element::label(subtitle.clone())
+            Element::label(subtitle_text)
                 .font_size(12.0)
                 .fg_role(Role::TextMuted)
                 .max_lines(1)
@@ -291,7 +310,7 @@ fn doc_row(state: &AppState, entry: DocEntry) -> Element {
                 .width_match(),
         );
 
-    let close = icons::button("x", 20, tr!("action.close_file")).on_click({
+    let close = icons::button("x", 20, t!("action.close_file")).on_click({
         let st = st.clone();
         let d = doc.clone();
         move |ctx| actions::close_doc(&st, ctx, &d)
@@ -388,7 +407,7 @@ fn pending_panel(state: &AppState, doc: Rc<Doc>) -> Element {
                 .visible_when(move || parsing.get()),
         )
         .child(
-            Element::label(error)
+            Element::label(t!("parse.failed_detail", error = error))
                 .font_size(13.0)
                 .fg_role(Role::Danger)
                 .text_align(Align::Center)

@@ -28,6 +28,9 @@ pub struct DeviceRow {
     pub selected: Signal<bool>,
     pub phase: Signal<Option<InstallPhase>>,
     pub message: Signal<String>,
+    /// 多个安装包一轮装完后的汇总（成功 / 失败个数）；都为 0 表示没有汇总，显示单条结果。
+    pub ok: Signal<i64>,
+    pub failed: Signal<i64>,
 }
 
 /// 左栏一个安装包。打开窗口时从已解析的文档拍快照：安装途中主窗关掉了这个文档，
@@ -77,6 +80,8 @@ pub struct InstallState {
     pub devices: Signal<Vec<DeviceRow>>,
     pub loading_devices: Signal<bool>,
     pub device_error: Signal<String>,
+    /// 找不到 adb（提示文案走 t!，与 `device_error` 的原始错误分开）。
+    pub no_adb: Signal<bool>,
     pub installing: Signal<bool>,
     pub show_advanced: Signal<bool>,
     pub show_splits: Signal<bool>,
@@ -119,6 +124,7 @@ impl InstallState {
             devices: signal(Vec::new()),
             loading_devices: signal(false),
             device_error: signal(String::new()),
+            no_adb: signal(false),
             installing: signal(false),
             show_advanced: signal(false),
             show_splits: signal(false),
@@ -232,6 +238,8 @@ pub fn open(state: &AppState, ctx: &mut EventCtx) {
     for d in ins.devices.get() {
         d.phase.set(None);
         d.message.set(String::new());
+        d.ok.set(0);
+        d.failed.set(0);
     }
     ctx.open_window(window(state));
     refresh_devices(state, ctx);
@@ -303,11 +311,13 @@ fn window(state: &AppState) -> WindowRequest {
 pub fn refresh_devices(state: &AppState, ctx: &mut EventCtx) {
     let ins = &state.install;
     let Some(adb) = crate::tools::resolve_adb(state) else {
-        ins.device_error.set(tr!("install.no_adb"));
+        ins.no_adb.set(true);
+        ins.device_error.set(String::new());
         ins.devices.set(Vec::new());
         return;
     };
     let _ = ctx;
+    ins.no_adb.set(false);
     ins.device_error.set(String::new());
     ins.loading_devices.set(true);
     let tx = state.tx.clone();
@@ -325,7 +335,8 @@ pub fn on_devices(state: &AppState, _ctx: &mut EventCtx, result: Result<Vec<AdbD
             // 保留已有行的选中状态与结果（刷新不应清掉刚装完的结果）。
             // 旧行的状态要保留（刚装完的结果不能被刷新清掉），所以先把值拷出来，
             // 再在新的作用域里重建全部信号——这样消失的设备不会留下永不回收的槽位。
-            let old: Vec<(String, bool, Option<InstallPhase>, String)> = ins.devices.with(|v| {
+            type Kept = (String, bool, Option<InstallPhase>, String, i64, i64);
+            let old: Vec<Kept> = ins.devices.with(|v| {
                 v.iter()
                     .map(|r| {
                         (
@@ -333,6 +344,8 @@ pub fn on_devices(state: &AppState, _ctx: &mut EventCtx, result: Result<Vec<AdbD
                             r.selected.get(),
                             r.phase.get(),
                             r.message.get(),
+                            r.ok.get(),
+                            r.failed.get(),
                         )
                     })
                     .collect()
@@ -349,6 +362,8 @@ pub fn on_devices(state: &AppState, _ctx: &mut EventCtx, result: Result<Vec<AdbD
                             selected: signal(prev.map(|p| p.1).unwrap_or(default_sel)),
                             phase: signal(prev.and_then(|p| p.2)),
                             message: signal(prev.map(|p| p.3.clone()).unwrap_or_default()),
+                            ok: signal(prev.map(|p| p.4).unwrap_or(0)),
+                            failed: signal(prev.map(|p| p.5).unwrap_or(0)),
                             device: d,
                         }
                     })
@@ -455,8 +470,8 @@ pub fn on_msg(state: &AppState, ctx: &mut EventCtx, msg: InstallMsg) {
                     } else {
                         InstallPhase::Failed
                     }));
-                    row.message
-                        .set(tr!("install.summary", ok = s as i64, failed = f as i64));
+                    row.ok.set(s as i64);
+                    row.failed.set(f as i64);
                 }
                 // 全部装好的设备自动取消勾选，防止再点一次重复安装。
                 if f == 0 && s > 0 {
@@ -545,6 +560,8 @@ fn start_install(state: &AppState, ctx: &mut EventCtx) {
         {
             row.phase.set(None);
             row.message.set(String::new());
+            row.ok.set(0);
+            row.failed.set(0);
         }
     }
     *ins.batch.borrow_mut() = batch;
@@ -611,9 +628,10 @@ fn build_window(state: &AppState) -> Element {
 
     let files = ins.files;
     let devices = ins.devices;
-    let summary = Element::label(Signal::map(ins.file_count, |n| {
-        tr!("install.selected_files", count = *n as i64)
-    }))
+    let summary = Element::label(t!(
+        "install.selected_files",
+        count = Signal::map(ins.file_count, |n| *n as i64)
+    ))
     .font_size(12.5)
     .fg_role(Role::TextMuted);
 
@@ -720,7 +738,7 @@ fn build_window(state: &AppState) -> Element {
 
     Element::stack()
         .fill()
-        .child(super::window_chrome(tr!("install.title"), page))
+        .child(super::window_chrome(t!("install.title"), page))
         .child(confirm_dialog)
 }
 
@@ -794,15 +812,6 @@ fn file_row(state: &AppState, row: FileRow) -> Element {
             ),
     };
     let status = row.status;
-    let status_text = Signal::map(status, |s| match s {
-        None => String::new(),
-        Some(FileStatus::Waiting) => tr!("install.waiting"),
-        Some(FileStatus::Installing) => tr!("install.installing"),
-        Some(FileStatus::Success) => tr!("install.success"),
-        Some(FileStatus::Partial) => tr!("install.partial"),
-        Some(FileStatus::Failed) => tr!("install.failed"),
-        Some(FileStatus::Stopped) => tr!("install.stopped"),
-    });
     let status_role = Signal::map(status, |s| match s {
         Some(FileStatus::Success) => Role::Success,
         Some(FileStatus::Failed | FileStatus::Partial) => Role::Danger,
@@ -847,11 +856,23 @@ fn file_row(state: &AppState, row: FileRow) -> Element {
                         .truncate(Truncate::Middle)
                         .width_match(),
                 )
-                .child(
-                    Element::label(status_text)
-                        .font_size(11.5)
-                        .fg_role_signal(status_role)
-                        .visible_when(move || status.with(|s| s.is_some())),
+                // 每种状态一条 t! 文案，按当前状态显隐：换语言跟随。
+                .children(
+                    [
+                        (FileStatus::Waiting, "install.waiting"),
+                        (FileStatus::Installing, "install.installing"),
+                        (FileStatus::Success, "install.success"),
+                        (FileStatus::Partial, "install.partial"),
+                        (FileStatus::Failed, "install.failed"),
+                        (FileStatus::Stopped, "install.stopped"),
+                    ]
+                    .into_iter()
+                    .map(move |(which, key)| {
+                        Element::label(t!(key))
+                            .font_size(11.5)
+                            .fg_role_signal(status_role)
+                            .visible_when(move || status.get() == Some(which))
+                    }),
                 ),
         )
         .child(super::kind_badge_small(row.info.kind))
@@ -862,6 +883,7 @@ fn device_section(state: &AppState) -> Element {
     let ins = state.install.clone();
     let loading = ins.loading_devices;
     let error = ins.device_error;
+    let no_adb = ins.no_adb;
     let devices = ins.devices;
     let installing = ins.installing;
 
@@ -872,21 +894,22 @@ fn device_section(state: &AppState) -> Element {
         .cross(Align::Center)
         .spacing(6)
         .child(
-            Element::label(Signal::map(devices, |v| {
-                tr!("install.device_count", count = v.len() as i64)
-            }))
+            Element::label(t!(
+                "install.device_count",
+                count = Signal::map(devices, |v| v.len() as i64)
+            ))
             .font_size(12.0)
             .fg_role(Role::TextMuted),
         )
         .child(
-            crate::icons::button("refresh", 26, tr!("install.refresh_devices"))
+            crate::icons::button("refresh", 26, t!("install.refresh_devices"))
                 .enabled_when(move || !installing.get() && !loading.get())
                 .on_click(move |ctx| refresh_devices(&st, ctx)),
         );
     card(
         "smartphone",
         CARD_BLUE,
-        tr!("install.select_device"),
+        t!("install.select_device"),
         Some(action),
         Element::col()
             .width_match()
@@ -895,6 +918,13 @@ fn device_section(state: &AppState) -> Element {
                     .fg_role(Role::TextMuted)
                     .padding(8)
                     .visible_when(move || loading.get()),
+            )
+            .child(
+                Element::label(t!("install.no_adb"))
+                    .fg_role(Role::Danger)
+                    .padding(8)
+                    .width_match()
+                    .visible_when(move || !loading.get() && no_adb.get()),
             )
             .child(
                 Element::label(error)
@@ -909,6 +939,7 @@ fn device_section(state: &AppState) -> Element {
                     .padding(8)
                     .visible_when(move || {
                         !loading.get()
+                            && !no_adb.get()
                             && error.with(|e| e.is_empty())
                             && devices.with(|v| v.is_empty())
                     }),
@@ -922,11 +953,11 @@ fn device_row(row: DeviceRow) -> Element {
     let offline = d.is_offline();
     let unauthorized = d.is_unauthorized();
     let status_text = if offline {
-        tr!("install.offline")
+        t!("install.offline")
     } else if unauthorized {
-        tr!("install.unauthorized")
+        t!("install.unauthorized")
     } else {
-        tr!("install.online")
+        t!("install.online")
     };
     let status_badge = if offline || unauthorized {
         Element::badge_intent(status_text, Intent::Neutral)
@@ -935,28 +966,7 @@ fn device_row(row: DeviceRow) -> Element {
     };
     let phase = row.phase;
     let message = row.message;
-    let result_text = Signal::map(phase, move |p| match p {
-        None => String::new(),
-        Some(InstallPhase::Installing) => tr!("install.installing"),
-        Some(InstallPhase::PushingObb) => tr!("install.pushing_obb"),
-        Some(InstallPhase::Success) => {
-            let m = message.get();
-            if m.is_empty() {
-                tr!("install.success")
-            } else {
-                m
-            }
-        }
-        Some(InstallPhase::Failed) => {
-            let m = message.get();
-            if m.is_empty() {
-                tr!("install.failed")
-            } else {
-                format!("{}: {}", tr!("install.failed"), crate::ui::shorten(&m, 80))
-            }
-        }
-        Some(InstallPhase::Stopped) => tr!("install.stopped"),
-    });
+    let (ok, failed) = (row.ok, row.failed);
     let result_role = Signal::map(phase, |p| match p {
         Some(InstallPhase::Success) => Role::Success,
         Some(InstallPhase::Failed) => Role::Danger,
@@ -1011,13 +1021,68 @@ fn device_row(row: DeviceRow) -> Element {
                         .visible(!subtitle.is_empty()),
                 ),
         )
-        .child(
-            Element::label(result_text)
-                .font_size(12.5)
-                .fg_role_signal(result_role)
-                .max_lines(2)
-                .width(200),
-        )
+        .child(device_result(phase, message, ok, failed, result_role))
+}
+
+/// 设备行右侧的结果：每种情况一条文案按状态显隐，固定文案走 t! 跟随语言，
+/// adb 返回的原始消息原样显示。
+fn device_result(
+    phase: Signal<Option<InstallPhase>>,
+    message: Signal<String>,
+    ok: Signal<i64>,
+    failed: Signal<i64>,
+    role: Signal<Role>,
+) -> Element {
+    let line = |text: TextContent, show: Box<dyn Fn() -> bool>| {
+        Element::label(text)
+            .font_size(12.5)
+            .fg_role_signal(role)
+            .max_lines(2)
+            .width_match()
+            .visible_when(show)
+    };
+    let is = move |p: InstallPhase| phase.get() == Some(p);
+    let summed = move || ok.get() + failed.get() > 0;
+    let has_msg = move || message.with(|m| !m.is_empty());
+    let done = move || is(InstallPhase::Success) || is(InstallPhase::Failed);
+    Element::col()
+        .width(200)
+        .child(line(
+            t!("install.installing").into(),
+            Box::new(move || is(InstallPhase::Installing)),
+        ))
+        .child(line(
+            t!("install.pushing_obb").into(),
+            Box::new(move || is(InstallPhase::PushingObb)),
+        ))
+        .child(line(
+            t!("install.summary", ok = ok, failed = failed).into(),
+            Box::new(move || done() && summed()),
+        ))
+        .child(line(
+            t!("install.success").into(),
+            Box::new(move || is(InstallPhase::Success) && !summed() && !has_msg()),
+        ))
+        .child(line(
+            message.into(),
+            Box::new(move || is(InstallPhase::Success) && !summed() && has_msg()),
+        ))
+        .child(line(
+            t!("install.failed").into(),
+            Box::new(move || is(InstallPhase::Failed) && !summed() && !has_msg()),
+        ))
+        .child(line(
+            t!(
+                "install.failed_detail",
+                error = Signal::map(message, |m| crate::ui::shorten(m, 80))
+            )
+            .into(),
+            Box::new(move || is(InstallPhase::Failed) && !summed() && has_msg()),
+        ))
+        .child(line(
+            t!("install.stopped").into(),
+            Box::new(move || is(InstallPhase::Stopped)),
+        ))
 }
 
 fn options_section(state: &AppState) -> Element {
@@ -1025,7 +1090,7 @@ fn options_section(state: &AppState) -> Element {
     fold_card(
         "settings",
         CARD_PURPLE,
-        tr!("install.advanced_options"),
+        t!("install.advanced_options"),
         None,
         ins.show_advanced,
         Element::col()
@@ -1078,7 +1143,7 @@ fn splits_section(state: &AppState) -> Element {
                     .width(72)
                     .text_align(Align::End),
             )
-            .child(Element::badge_intent(tr!(kind_key), Intent::Neutral))
+            .child(Element::badge_intent(t!(kind_key), Intent::Neutral))
     })
     .width_match();
 
@@ -1126,7 +1191,7 @@ fn splits_section(state: &AppState) -> Element {
     fold_card(
         "layers",
         CARD_ORANGE,
-        tr!("install.split_options"),
+        t!("install.split_options"),
         Some(summary),
         ins.show_splits,
         Element::col()
@@ -1141,7 +1206,7 @@ fn splits_section(state: &AppState) -> Element {
 fn card(
     icon: &str,
     color: Color,
-    title: String,
+    title: impl Into<TextContent>,
     action: Option<Element>,
     body: Element,
 ) -> Element {
@@ -1175,7 +1240,7 @@ fn card(
 fn fold_card(
     icon: &str,
     color: Color,
-    title: String,
+    title: impl Into<TextContent>,
     summary: Option<Element>,
     show: Signal<bool>,
     body: Element,

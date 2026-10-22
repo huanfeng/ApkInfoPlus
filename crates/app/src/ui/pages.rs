@@ -41,19 +41,19 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
     let perm_count = info.meta.permissions.len();
     let split_count = info.splits.len() + info.obbs.len();
     let perm_title = if perm_count > 0 {
-        format!("{} ({})", tr!("tab.permissions"), perm_count)
+        t!("tab.permissions_count", count = perm_count as i64)
     } else {
-        tr!("tab.permissions")
+        t!("tab.permissions")
     };
     let split_title = if split_count > 0 {
-        format!("{} ({})", tr!("tab.splits"), split_count)
+        t!("tab.splits_count", count = split_count as i64)
     } else {
-        tr!("tab.splits")
+        t!("tab.splits")
     };
     let icon = crate::icons::gray;
     let mut pages = vec![
         (
-            tr!("tab.overview"),
+            t!("tab.overview"),
             icon("info"),
             overview(state, &doc, info.clone()),
         ),
@@ -68,13 +68,13 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
         pages.push((split_title, icon("layers"), splits(state, info.clone())));
     }
     pages.push((
-        tr!("tab.signature"),
+        t!("tab.signature"),
         icon("shield"),
         signature(state, &doc, info.clone()),
     ));
-    pages.push((tr!("tab.hashes"), icon("hash"), hashes(state, &doc)));
+    pages.push((t!("tab.hashes"), icon("hash"), hashes(state, &doc)));
     pages.push((
-        tr!("tab.text_info"),
+        t!("tab.text_info"),
         icon("file_text"),
         text_info(state, info.clone()),
     ));
@@ -105,10 +105,10 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
         )
 }
 
-fn libs_title(doc: &Doc) -> String {
+fn libs_title(doc: &Doc) -> windui::i18n::Message {
     match doc.libs.with(|v| v.first().map(|r| r.sdk_count())) {
-        Some(n) if n > 0 => format!("{} ({})", tr!("tab.libs"), n),
-        _ => tr!("tab.libs"),
+        Some(n) if n > 0 => t!("tab.libs_count", count = n as i64),
+        _ => t!("tab.libs"),
     }
 }
 
@@ -205,9 +205,9 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         t!("field.languages"),
         super::plain_value(
             Element::label(if m.locales.is_empty() {
-                tr!("field.none")
+                t!("field.none")
             } else {
-                tr!("field.language_count", count = m.locales.len() as i64)
+                t!("field.language_count", count = m.locales.len() as i64)
             })
             .font_size(13.0)
             .fg_role(if m.locales.is_empty() {
@@ -229,7 +229,7 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         t!("field.launchable_activities"),
         activities.join("\n"),
     ));
-    let basic_card = section("box", CARD_BLUE, tr!("field.basic_info"), basic);
+    let basic_card = section("box", CARD_BLUE, t!("field.basic_info"), basic);
 
     // ---- 证书信息（摘要，详情在签名页）----
     let cert_card = {
@@ -241,7 +241,7 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         section_with_action(
             "shield",
             CARD_PURPLE,
-            tr!("field.cert_info"),
+            t!("field.cert_info"),
             Some(link),
             certificate_summary(state, doc),
         )
@@ -251,7 +251,7 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     let path_text = info.path.display().to_string();
     let open_dir = {
         let p = info.path.clone();
-        crate::icons::button("folder", 24, tr!("action.open_dir")).on_click(move |ctx| {
+        crate::icons::button("folder", 24, t!("action.open_dir")).on_click(move |ctx| {
             if let Err(e) = crate::actions::reveal_in_file_manager(&p) {
                 ctx.toast_err(e);
             }
@@ -294,15 +294,17 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
                 format_file_size_full(t),
             ));
         }
-        file = file.child(field_row(
+        file = file.child(field_row_custom(
             state,
             t!("field.split_count"),
-            tr!("field.items", count = info.splits.len() as i64),
+            plain_label(t!("field.items", count = info.splits.len() as i64)),
+            None,
         ));
-        file = file.child(field_row(
+        file = file.child(field_row_custom(
             state,
             t!("field.obb_count"),
-            tr!("field.items", count = info.obbs.len() as i64),
+            plain_label(t!("field.items", count = info.obbs.len() as i64)),
+            None,
         ));
         if !info.split_configs.is_empty() {
             file = file.child(field_row(
@@ -321,7 +323,7 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     let file_card = section_with_action(
         "file",
         CARD_ORANGE,
-        tr!("field.file_info"),
+        t!("field.file_info"),
         file_action,
         file,
     );
@@ -348,7 +350,7 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
                 m.features_not_required.join("\n"),
             ));
         }
-        col = col.child(section("cpu", CARD_GREEN, tr!("field.features"), feat));
+        col = col.child(section("cpu", CARD_GREEN, t!("field.features"), feat));
     }
     page(col)
 }
@@ -425,15 +427,23 @@ fn certificate_summary(state: &AppState, doc: &Rc<Doc>) -> Element {
         .child(status("signature.disabled", SigState::Disabled))
         .child(status("signature.not_applicable", SigState::NotApplicable))
         .child(
-            Element::label(Signal::map(sig_error, |e| {
-                tr!("signature.failed", error = e.clone())
-            }))
-            .font_size(13.0)
-            .fg_role(Role::Danger)
-            .padding_xy(0, 4)
-            .visible_when(move || sig_state.get() == SigState::Failed),
+            Element::label(t!("signature.failed", error = sig_error))
+                .font_size(13.0)
+                .fg_role(Role::Danger)
+                .padding_xy(0, 4)
+                .visible_when(move || sig_state.get() == SigState::Failed),
         )
         .child(cards)
+}
+
+/// 字段行里不可选中的纯文本值（数量、位数这类跟随语言的短句）。
+fn plain_label(text: windui::i18n::Message) -> Element {
+    super::plain_value(
+        Element::label(text)
+            .font_size(13.0)
+            .fg_role(Role::Text)
+            .height(super::VALUE_H),
+    )
 }
 
 fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
@@ -455,9 +465,10 @@ fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
         .spacing(10)
         .child(Element::text_input(filter, t!("action.filter")).width(260))
         .child(
-            Element::label(Signal::map(filtered, |v| {
-                tr!("field.count", count = v.len() as i64)
-            }))
+            Element::label(t!(
+                "field.count",
+                count = Signal::map(filtered, |v| v.len() as i64)
+            ))
             .font_size(12.5)
             .fg_role(Role::TextMuted)
             .weight(1.0),
@@ -523,7 +534,7 @@ fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
 fn splits(state: &AppState, info: Rc<ApkInfo>) -> Element {
     let width = state.title_width.get();
     // 表头 + 行：用普通行而非 table_custom——表格要限高容器，而这页整体是滚动的。
-    let head = |a: String, b: String, c: String| {
+    let head = |a: TextContent, b: TextContent, c: TextContent| {
         Element::row()
             .width_match()
             .cross(Align::Center)
@@ -554,17 +565,17 @@ fn splits(state: &AppState, info: Rc<ApkInfo>) -> Element {
             )
     };
     let mut split_rows = Element::col().width_match().spacing(2).child(head(
-        tr!("field.split_apks"),
-        tr!("install.split_options"),
-        tr!("field.size"),
+        t!("field.split_apks").into(),
+        t!("install.split_options").into(),
+        t!("field.size").into(),
     ));
     for s in &info.splits {
         let kind = match s.kind {
-            SplitType::Base => tr!("install.split_type.base"),
-            SplitType::Language => tr!("install.split_type.language"),
-            SplitType::Abi => tr!("install.split_type.abi"),
-            SplitType::Density => tr!("install.split_type.density"),
-            SplitType::Unknown => tr!("install.split_type.unknown"),
+            SplitType::Base => t!("install.split_type.base"),
+            SplitType::Language => t!("install.split_type.language"),
+            SplitType::Abi => t!("install.split_type.abi"),
+            SplitType::Density => t!("install.split_type.density"),
+            SplitType::Unknown => t!("install.split_type.unknown"),
         };
         split_rows = split_rows.child(
             Element::row()
@@ -612,9 +623,9 @@ fn splits(state: &AppState, info: Rc<ApkInfo>) -> Element {
     );
 
     let mut obb_rows = Element::col().width_match().spacing(2).child(head(
-        tr!("field.obb_files"),
-        String::new(),
-        tr!("field.size"),
+        t!("field.obb_files").into(),
+        "".into(),
+        t!("field.size").into(),
     ));
     for o in &info.obbs {
         obb_rows = obb_rows.child(
@@ -638,7 +649,7 @@ fn splits(state: &AppState, info: Rc<ApkInfo>) -> Element {
     } else {
         obb_rows
     };
-    let obb_section = section("box", CARD_ORANGE, tr!("field.obb_files"), obb_body);
+    let obb_section = section("box", CARD_ORANGE, t!("field.obb_files"), obb_body);
 
     page(
         Element::col()
@@ -672,11 +683,9 @@ fn signature(state: &AppState, doc: &Doc, info: Rc<ApkInfo>) -> Element {
                 .visible_when(move || sig_state.get() == SigState::NotApplicable),
         )
         .child(
-            Element::label(Signal::map(sig_error, |e| {
-                tr!("signature.failed", error = e.clone())
-            }))
-            .fg_role(Role::Danger)
-            .visible_when(move || sig_state.get() == SigState::Failed),
+            Element::label(t!("signature.failed", error = sig_error))
+                .fg_role(Role::Danger)
+                .visible_when(move || sig_state.get() == SigState::Failed),
         );
 
     let cards = Element::host_signal(
@@ -695,7 +704,7 @@ fn signature(state: &AppState, doc: &Doc, info: Rc<ApkInfo>) -> Element {
             col = col.child(section(
                 "shield",
                 CARD_PURPLE,
-                tr!("signature.schemes"),
+                t!("signature.schemes"),
                 Element::col()
                     .width_match()
                     .spacing(8)
@@ -751,10 +760,11 @@ fn signature(state: &AppState, doc: &Doc, info: Rc<ApkInfo>) -> Element {
                         signer.key_algorithm.clone(),
                     ));
                 if let Some(bits) = signer.key_size_bits {
-                    body = body.child(field_row(
+                    body = body.child(field_row_custom(
                         &st,
                         t!("signature.key_size"),
-                        tr!("signature.bits", bits = bits as i64),
+                        plain_label(t!("signature.bits", bits = bits as i64)),
+                        None,
                     ));
                 }
                 body = body.child(field_row(
@@ -765,7 +775,7 @@ fn signature(state: &AppState, doc: &Doc, info: Rc<ApkInfo>) -> Element {
                 col = col.child(section(
                     "badge_check",
                     CARD_GREEN,
-                    tr!("signature.signer", n = (i + 1) as i64),
+                    t!("signature.signer", n = (i + 1) as i64),
                     body,
                 ));
             }
@@ -798,17 +808,11 @@ fn hashes(state: &AppState, doc: &Doc) -> Element {
     let st = state.clone();
 
     let row = |title: &'static str, sig: Signal<String>| {
-        let shown = Signal::map(sig, move |v| {
-            if v.is_empty() {
-                match hs.get() {
-                    HashState::Computing => tr!("field.computing"),
-                    HashState::Disabled => tr!("hash.disabled"),
-                    _ => String::new(),
-                }
-            } else {
-                v.clone()
-            }
-        });
+        // 值为空时按状态显示「计算中 / 已关闭」，占位文案走 t! 跟随语言。
+        let placeholder = |key: &'static str, want: HashState| {
+            plain_label(t!(key))
+                .visible_when(move || sig.with(|v| v.is_empty()) && hs.get() == want)
+        };
         field_row_custom(
             &st,
             t!(title),
@@ -816,12 +820,18 @@ fn hashes(state: &AppState, doc: &Doc) -> Element {
                 .cross(Align::Center)
                 .spacing(2)
                 .child(
-                    selectable_signal(shown)
-                        .font_family(super::mono_family())
-                        .weight(1.0),
+                    Element::col()
+                        .weight(1.0)
+                        .child(
+                            selectable_signal(sig)
+                                .font_family(super::mono_family())
+                                .visible_when(move || sig.with(|v| !v.is_empty())),
+                        )
+                        .child(placeholder("field.computing", HashState::Computing))
+                        .child(placeholder("hash.disabled", HashState::Disabled)),
                 )
                 .child(
-                    crate::icons::button("copy", 24, tr!("action.copy"))
+                    crate::icons::button("copy", 24, t!("action.copy"))
                         .enabled_when(move || sig.with(|v| !v.is_empty()))
                         .on_click(move |ctx| {
                             let v = sig.get();
@@ -837,13 +847,13 @@ fn hashes(state: &AppState, doc: &Doc) -> Element {
         Element::col().width_match().child(section(
             "hash",
             CARD_BLUE,
-            tr!("tab.hashes"),
+            t!("tab.hashes"),
             Element::col()
                 .width_match()
                 .child(row("field.md5", md5))
                 .child(row("field.sha1", sha1))
                 .child(
-                    Element::label(Signal::map(err, |e| tr!("hash.failed", error = e.clone())))
+                    Element::label(t!("hash.failed", error = err))
                         .fg_role(Role::Danger)
                         .visible_when(move || hs.get() == HashState::Failed),
                 ),

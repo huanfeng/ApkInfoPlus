@@ -1,4 +1,6 @@
-//! 「库」标签页：LibChecker 规则识别出的原生库与 SDK 组件，点开某个 SDK 看详情。
+//! 「库」标签页：LibChecker 规则识别出的原生库、SDK 组件与 DEX 包，点开某个 SDK 看详情。
+//!
+//! 页面里的固定文案一律用 `t!`：切换界面语言时不重建页面也能跟着变。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -38,55 +40,101 @@ impl DetailState {
 #[derive(Clone)]
 pub struct RulesUpdateState {
     pub running: Signal<bool>,
-    /// 当前规则版本与来源的说明。
-    pub current: Signal<String>,
-    /// 上次检查的结果（成功 / 已是最新 / 失败原因）。
-    pub message: Signal<String>,
+    /// 当前规则的版本与条数；没有规则时版本为 0。
+    pub version: Signal<i64>,
+    pub count: Signal<i64>,
+    pub origin: Signal<Option<crate::libs::Origin>>,
+    /// 上次检查的结果；`None` 表示还没查过或正在查。
+    pub outcome: Signal<Option<RulesOutcome>>,
+    /// 结果里的上游版本号（已更新 / 已是最新）。
+    pub outcome_version: Signal<i64>,
+    /// 失败原因（原始错误文本，句子由 `t!` 套）。
+    pub error: Signal<String>,
+}
+
+/// 规则检查的结果类别，界面按它切换对应的 `t!` 文案。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RulesOutcome {
+    Updated,
+    UpToDate,
+    Failed,
 }
 
 impl RulesUpdateState {
     pub fn new() -> Self {
         Self {
             running: signal(false),
-            current: signal(String::new()),
-            message: signal(String::new()),
+            version: signal(0),
+            count: signal(0),
+            origin: signal(None),
+            outcome: signal(None),
+            outcome_version: signal(0),
+            error: signal(String::new()),
         }
     }
-}
 
-fn current_rules_text() -> String {
-    match crate::libs::current() {
-        Some((r, origin)) => {
-            let origin = match origin {
-                crate::libs::Origin::Bundled => tr!("settings.rules_bundled"),
-                crate::libs::Origin::Downloaded => tr!("settings.rules_downloaded"),
-            };
-            tr!(
-                "settings.rules_current",
-                version = r.meta().data_version as i64,
-                count = r.rules().len() as i64,
-                origin = origin
-            )
-        }
-        None => tr!("settings.rules_none"),
+    fn refresh(&self) {
+        let cur = crate::libs::current();
+        self.version.set(
+            cur.as_ref()
+                .map_or(0, |(r, _)| r.meta().data_version as i64),
+        );
+        self.count
+            .set(cur.as_ref().map_or(0, |(r, _)| r.rules().len() as i64));
+        self.origin.set(cur.map(|(_, o)| o));
     }
 }
 
 /// 设置 →「工具」里的规则卡片：当前版本 + 检查更新。
 pub fn rules_card(state: &AppState) -> Element {
     let ru = state.rules_update.clone();
-    ru.current.set(current_rules_text());
+    ru.refresh();
     let st = state.clone();
+    let origin_label = |key: &'static str, want: crate::libs::Origin| {
+        let origin = ru.origin;
+        Element::label(t!(key))
+            .font_size(12.5)
+            .fg_role(Role::TextMuted)
+            .visible_when(move || origin.get() == Some(want))
+    };
+    let has_rules = {
+        let origin = ru.origin;
+        move || origin.get().is_some()
+    };
     Element::card(
-        tr!("settings.rules_title"),
+        t!("settings.rules_title"),
         Element::col()
             .width_match()
             .spacing(8)
             .child(
-                Element::label(ru.current)
-                    .font_size(12.5)
-                    .fg_role(Role::TextMuted)
-                    .width_match(),
+                Element::row()
+                    .width_match()
+                    .spacing(4)
+                    .child(
+                        Element::label(t!(
+                            "settings.rules_current",
+                            version = ru.version,
+                            count = ru.count
+                        ))
+                        .font_size(12.5)
+                        .fg_role(Role::TextMuted)
+                        .visible_when(has_rules),
+                    )
+                    .child(origin_label(
+                        "settings.rules_bundled",
+                        crate::libs::Origin::Bundled,
+                    ))
+                    .child(origin_label(
+                        "settings.rules_downloaded",
+                        crate::libs::Origin::Downloaded,
+                    ))
+                    .child(
+                        Element::label(t!("settings.rules_none"))
+                            .font_size(12.5)
+                            .fg_role(Role::TextMuted)
+                            .width_match()
+                            .visible_when(move || !has_rules()),
+                    ),
             )
             .child(
                 Element::row()
@@ -117,17 +165,36 @@ pub fn rules_card(state: &AppState) -> Element {
                             .font_size(12.0),
                     ),
             )
-            .child(
-                Element::label(ru.message)
-                    .font_size(12.0)
-                    .fg_role(Role::TextMuted)
-                    .width_match()
-                    .visible_when({
-                        let (m, running) = (ru.message, ru.running);
-                        move || !running.get() && m.with(|s| !s.is_empty())
-                    }),
-            ),
+            .child(outcome_label(
+                &ru,
+                RulesOutcome::Updated,
+                t!("settings.rules_updated", version = ru.outcome_version),
+            ))
+            .child(outcome_label(
+                &ru,
+                RulesOutcome::UpToDate,
+                t!("settings.rules_up_to_date", version = ru.outcome_version),
+            ))
+            .child(outcome_label(
+                &ru,
+                RulesOutcome::Failed,
+                t!("settings.rules_update_failed", error = ru.error),
+            )),
     )
+}
+
+/// 检查结果的一行提示：只在结果是 `want` 且不在检查中时显示。
+fn outcome_label(
+    ru: &RulesUpdateState,
+    want: RulesOutcome,
+    text: windui::i18n::Message,
+) -> Element {
+    let (outcome, running) = (ru.outcome, ru.running);
+    Element::label(text)
+        .font_size(12.0)
+        .fg_role(Role::TextMuted)
+        .width_match()
+        .visible_when(move || !running.get() && outcome.get() == Some(want))
 }
 
 fn start_rules_update(state: &AppState) {
@@ -136,7 +203,7 @@ fn start_rules_update(state: &AppState) {
         return;
     }
     ru.running.set(true);
-    ru.message.set(String::new());
+    ru.outcome.set(None);
     let tx = state.tx.clone();
     std::thread::spawn(move || {
         let _ = tx.send(crate::state::Msg::RulesUpdate(crate::libs::check_update()));
@@ -147,11 +214,11 @@ fn start_rules_update(state: &AppState) {
 pub fn on_rules_update(state: &AppState, ctx: &mut EventCtx, result: Result<(u32, bool), String>) {
     let ru = &state.rules_update;
     ru.running.set(false);
-    ru.current.set(current_rules_text());
+    ru.refresh();
     match result {
         Ok((v, true)) => {
-            ru.message
-                .set(tr!("settings.rules_updated", version = v as i64));
+            ru.outcome_version.set(v as i64);
+            ru.outcome.set(Some(RulesOutcome::Updated));
             ctx.toast_ok(tr!("settings.rules_updated", version = v as i64));
             for doc in state.docs.get() {
                 if let Some(info) = doc.current_info() {
@@ -166,13 +233,14 @@ pub fn on_rules_update(state: &AppState, ctx: &mut EventCtx, result: Result<(u32
                 }
             }
         }
-        Ok((v, false)) => ru
-            .message
-            .set(tr!("settings.rules_up_to_date", version = v as i64)),
+        Ok((v, false)) => {
+            ru.outcome_version.set(v as i64);
+            ru.outcome.set(Some(RulesOutcome::UpToDate));
+        }
         Err(e) => {
             log::warn!("LibChecker 规则更新失败: {e}");
-            ru.message
-                .set(tr!("settings.rules_update_failed", error = e.clone()));
+            ru.error.set(e.clone());
+            ru.outcome.set(Some(RulesOutcome::Failed));
             ctx.toast_err(tr!("settings.rules_update_failed", error = e));
         }
     }
@@ -209,6 +277,7 @@ pub fn libs_page(state: &AppState, doc: &Doc, info: Rc<ApkInfo>) -> Element {
             .child(summary(&report, &info))
             .child(native_section(state, &rules, &report, &info))
             .child(component_section(state, &rules, &report, &info))
+            .child(dex_section(state, &rules, &report, &info))
             .children(unmatched_section(state, &report, &info)),
     )
 }
@@ -218,7 +287,7 @@ fn summary(report: &LibReport, info: &ApkInfo) -> Element {
         .width_match()
         .spacing(6)
         .child(
-            Element::label(tr!(
+            Element::label(t!(
                 "libs.summary",
                 sdks = report.sdk_count() as i64,
                 native = info.native_libs.len() as i64,
@@ -226,12 +295,13 @@ fn summary(report: &LibReport, info: &ApkInfo) -> Element {
             ))
             .width_match(),
         )
+        .children(markers_row(report))
         .child(
             Element::row()
                 .cross(Align::Center)
                 .spacing(4)
                 .child(
-                    Element::label(tr!(
+                    Element::label(t!(
                         "libs.rules_source",
                         version = report.data_version as i64
                     ))
@@ -250,6 +320,33 @@ fn summary(report: &LibReport, info: &ApkInfo) -> Element {
                 ),
         );
     section("blocks", CARD_PURPLE, t!("libs.title"), body)
+}
+
+/// 技术栈 / 加固标记徽章；一个都没有时不占行。
+fn markers_row(report: &LibReport) -> Option<Element> {
+    let m = report.markers;
+    let badges: Vec<(&'static str, Intent)> = [
+        (m.kotlin, "libs.marker.kotlin", Intent::Primary),
+        (m.compose, "libs.marker.compose", Intent::Primary),
+        (m.qihoo, "libs.marker.qihoo", Intent::Warning),
+        (m.secneo, "libs.marker.secneo", Intent::Warning),
+    ]
+    .into_iter()
+    .filter(|(on, _, _)| *on)
+    .map(|(_, k, i)| (k, i))
+    .collect();
+    if badges.is_empty() {
+        return None;
+    }
+    let mut row = Element::flow().spacing(6).run_spacing(4).child(
+        Element::label(t!("libs.tech"))
+            .font_size(12.5)
+            .fg_role(Role::TextMuted),
+    );
+    for (key, intent) in badges {
+        row = row.child(Element::badge_intent(t!(key), intent));
+    }
+    Some(row)
 }
 
 fn native_section(
@@ -274,7 +371,7 @@ fn native_section(
             }
             abis.insert(libs[i].abi.as_str());
         }
-        let items = names
+        let items: Vec<String> = names
             .iter()
             .map(|n| {
                 let abis: Vec<&str> = g
@@ -291,16 +388,16 @@ fn native_section(
             state,
             rules,
             g,
-            names.join(", "),
-            trailing,
-            items,
+            names.join(", ").into(),
+            vec![trailing.into()],
+            move || items.clone(),
         ));
     }
 
     section(
         "cpu",
         CARD_BLUE,
-        tr!("libs.native_title", native = libs.len() as i64),
+        t!("libs.native_title", native = libs.len() as i64),
         body,
     )
 }
@@ -317,7 +414,7 @@ fn unmatched_section(state: &AppState, report: &LibReport, info: &ApkInfo) -> Op
     if unmatched.is_empty() {
         return None;
     }
-    let title = tr!("libs.unmatched", count = unmatched.len() as i64);
+    let title = t!("libs.unmatched", count = unmatched.len() as i64);
     let width = state.title_width.get();
     let mut body = Element::col().width_match().spacing(2);
     for (name, (abis, size)) in unmatched {
@@ -367,43 +464,48 @@ fn component_section(
         for &i in &g.items {
             *kinds.entry(components[i].kind).or_default() += 1;
         }
-        let trailing = kinds
-            .iter()
-            .map(|(k, n)| format!("{} {n}", kind_name(*k)))
-            .collect::<Vec<_>>()
-            .join(" · ");
+        // 「活动 3 · 服务 2」：类别名逐个走 t!，换语言跟随
+        let mut trailing: Vec<TextContent> = Vec::new();
+        for (k, n) in &kinds {
+            if !trailing.is_empty() {
+                trailing.push("·".into());
+            }
+            trailing.push(t!(kind_key(*k)).into());
+            trailing.push(n.to_string().into());
+        }
         let preview: Vec<&str> = g
             .items
             .iter()
             .take(PREVIEW_NAMES)
             .map(|&i| components[i].short_name(pkg))
             .collect();
-        let mut preview_text = preview.join(", ");
-        if g.items.len() > PREVIEW_NAMES {
-            preview_text = tr!(
-                "libs.and_more",
-                names = preview_text,
-                count = g.items.len() as i64
-            );
-        }
-        let items = g
+        let preview_text = preview_with_more(preview.join(", "), g.items.len());
+        let hits: Vec<(ComponentKind, String, bool)> = g
             .items
             .iter()
             .zip(&g.sources)
             .map(|(&i, s)| {
                 let c = &components[i];
-                let via = if *s == MatchSource::Action {
-                    format!("  [{}]", tr!("libs.via_action"))
-                } else {
-                    String::new()
-                };
-                format!("{}  {}{via}", kind_name(c.kind), c.name)
+                (c.kind, c.name.clone(), *s == MatchSource::Action)
             })
             .collect();
+        // 详情对话框打开时才拼文本（tr! 定格在打开那一刻的语言）
+        let items = move || {
+            hits.iter()
+                .map(|(kind, name, via_action)| {
+                    let via = if *via_action {
+                        format!("  [{}]", tr!("libs.via_action"))
+                    } else {
+                        String::new()
+                    };
+                    format!("{}  {name}{via}", tr!(kind_key(*kind)))
+                })
+                .collect()
+        };
         body = body.child(group_row(state, rules, g, preview_text, trailing, items));
     }
     body = body.child(
-        Element::label(tr!(
+        Element::label(t!(
             "libs.components_footer",
             total = components.len() as i64,
             matched = matched as i64
@@ -415,12 +517,75 @@ fn component_section(
     section("box", CARD_GREEN, t!("libs.components_title"), body)
 }
 
-fn kind_name(kind: ComponentKind) -> String {
+/// 「a, b, c 等 N 个」：超过预览数时整句走 `t!`，换语言跟随。
+fn preview_with_more(names: String, total: usize) -> TextContent {
+    if total > PREVIEW_NAMES {
+        t!("libs.and_more", names = names, count = total as i64).into()
+    } else {
+        names.into()
+    }
+}
+
+/// DEX 里的包按 type 5 规则（包名前缀）识别出的 SDK。
+fn dex_section(
+    state: &AppState,
+    rules: &Arc<RuleSet>,
+    report: &LibReport,
+    info: &ApkInfo,
+) -> Element {
+    let mut body = Element::col().width_match().spacing(2);
+    let Some(dex) = &info.dex else {
+        body = body.child(Element::label(t!("libs.no_dex")).fg_role(Role::TextSubtle));
+        return section("hash", CARD_PURPLE, t!("libs.dex_title"), body);
+    };
+    if report.dex.is_empty() {
+        body = body.child(Element::label(t!("libs.no_dex_match")).fg_role(Role::TextSubtle));
+    }
+    let pkgs = &report.dex_packages;
+    for g in &report.dex {
+        let preview: Vec<&str> = g
+            .items
+            .iter()
+            .take(PREVIEW_NAMES)
+            .map(|&i| pkgs[i].as_str())
+            .collect();
+        let items: Vec<String> = g
+            .items
+            .iter()
+            .map(|&i| {
+                let classes = dex.packages.get(&pkgs[i]).copied().unwrap_or(0);
+                format!("{}  ({classes})", pkgs[i])
+            })
+            .collect();
+        body = body.child(group_row(
+            state,
+            rules,
+            g,
+            preview_with_more(preview.join(", "), g.items.len()),
+            vec![t!("libs.packages", count = g.items.len() as i64).into()],
+            move || items.clone(),
+        ));
+    }
+    body = body.child(
+        Element::label(t!(
+            "libs.dex_footer",
+            dex = dex.dex_count as i64,
+            classes = dex.class_count as i64,
+            packages = dex.packages.len() as i64
+        ))
+        .font_size(12.0)
+        .fg_role(Role::TextSubtle)
+        .padding_edges(Insets::new(8, 8, 8, 0)),
+    );
+    section("hash", CARD_PURPLE, t!("libs.dex_title"), body)
+}
+
+fn kind_key(kind: ComponentKind) -> &'static str {
     match kind {
-        ComponentKind::Activity => tr!("libs.kind.activity"),
-        ComponentKind::Service => tr!("libs.kind.service"),
-        ComponentKind::Receiver => tr!("libs.kind.receiver"),
-        ComponentKind::Provider => tr!("libs.kind.provider"),
+        ComponentKind::Activity => "libs.kind.activity",
+        ComponentKind::Service => "libs.kind.service",
+        ComponentKind::Receiver => "libs.kind.receiver",
+        ComponentKind::Provider => "libs.kind.provider",
     }
 }
 
@@ -429,9 +594,9 @@ fn group_row(
     state: &AppState,
     rules: &Arc<RuleSet>,
     g: &SdkGroup,
-    preview: String,
-    trailing: String,
-    items: Vec<String>,
+    preview: TextContent,
+    trailing: Vec<TextContent>,
+    items: impl Fn() -> Vec<String> + 'static,
 ) -> Element {
     let icon_svg = g.icon_id.as_deref().and_then(|id| rules.icon_svg(id));
     let row = Element::row()
@@ -454,9 +619,11 @@ fn group_row(
                 ),
         )
         .child(
-            Element::label(trailing)
-                .font_size(12.0)
-                .fg_role(Role::TextMuted),
+            Element::row().spacing(4).children(
+                trailing
+                    .into_iter()
+                    .map(|t| Element::label(t).font_size(12.0).fg_role(Role::TextMuted)),
+            ),
         );
     let detail_state = state.lib_detail.clone();
     let lang = crate::libs::detail_locale(&state.locale.language());
@@ -475,7 +642,7 @@ fn group_row(
                 String::new()
             },
             regex: group.rule.is_regex_rule,
-            items: items.clone(),
+            items: items(),
         };
         detail_state.view.set(vec![Rc::new(view)]);
         detail_state.show.set(true);
@@ -514,7 +681,7 @@ pub fn build_dialog(state: &AppState) -> Element {
         );
     Element::dialog_panel(
         show,
-        tr!("libs.detail_title"),
+        t!("libs.detail_title"),
         600,
         move |_| show.set(false),
         body,
@@ -556,9 +723,9 @@ fn detail_body(v: &DetailView) -> Element {
     }
     if !v.rule_name.is_empty() {
         let rule = if v.regex {
-            tr!("libs.rule_regex", rule = v.rule_name.clone())
+            t!("libs.rule_regex", rule = v.rule_name.clone())
         } else {
-            tr!("libs.rule_exact", rule = v.rule_name.clone())
+            t!("libs.rule_exact", rule = v.rule_name.clone())
         };
         col = col.child(
             Element::label(rule)
@@ -570,7 +737,7 @@ fn detail_body(v: &DetailView) -> Element {
     }
     col = col
         .child(
-            Element::label(tr!("libs.matched_items", count = v.items.len() as i64))
+            Element::label(t!("libs.matched_items", count = v.items.len() as i64))
                 .font_size(12.5)
                 .font_weight(600)
                 .fg_role(Role::TextMuted),
@@ -582,7 +749,7 @@ fn detail_body(v: &DetailView) -> Element {
         );
     if !d.rule_contributors.is_empty() {
         col = col.child(
-            Element::label(tr!(
+            Element::label(t!(
                 "libs.contributors",
                 names = d.rule_contributors.join(", ")
             ))

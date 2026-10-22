@@ -765,8 +765,8 @@ pub fn apply_parsed(
 
 fn apply_parse_error(state: &AppState, doc: &Rc<Doc>, e: String) {
     log::warn!("解析失败: {}", e);
-    doc.parse_error
-        .set(tr!("parse.failed_detail", error = e.clone()));
+    // 只存原始错误，界面用 t!("parse.failed_detail") 套句子，换语言跟随。
+    doc.parse_error.set(e);
     doc.subtitle.set(tr!("parse.failed"));
     state.refresh_entries();
 }

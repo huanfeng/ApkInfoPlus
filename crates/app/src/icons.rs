@@ -59,7 +59,7 @@ pub fn gray(name: &str) -> ImageContent {
 }
 
 /// 方形图标按钮：`px` 是按钮边长，图标约占 60%。
-pub fn button(name: &str, px: i32, tooltip: impl Into<String>) -> Element {
+pub fn button(name: &str, px: i32, tooltip: impl Into<TextContent>) -> Element {
     Element::icon_button_content(content(name, ICON_GRAY))
         .size(px, px)
         .tooltip(tooltip)

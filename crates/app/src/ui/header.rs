@@ -88,7 +88,7 @@ fn icon_block(state: &AppState, doc: Rc<Doc>) -> Element {
         .width(ICON_SIZE)
         .cross(Align::Center)
         .child(
-            icons::button("chevron_left", 22, tr!("action.prev_icon")).on_click({
+            icons::button("chevron_left", 22, t!("action.prev_icon")).on_click({
                 let st = st.clone();
                 let doc = doc.clone();
                 move |_| actions::switch_icon(&st, &doc, -1)
@@ -102,7 +102,7 @@ fn icon_block(state: &AppState, doc: Rc<Doc>) -> Element {
                 .weight(1.0),
         )
         .child(
-            icons::button("chevron_right", 22, tr!("action.next_icon")).on_click({
+            icons::button("chevron_right", 22, t!("action.next_icon")).on_click({
                 let st = st.clone();
                 let doc = doc.clone();
                 move |_| actions::switch_icon(&st, &doc, 1)
@@ -150,11 +150,12 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
     if has_alternatives {
         let d = doc.clone();
         name_row = name_row.child(
-            icons::button("globe", 26, tr!("action.switch_label_language"))
+            icons::button("globe", 26, t!("action.switch_label_language"))
                 .on_click(move |ctx| actions::show_label_menu(&d, ctx)),
         );
     }
-    // 签名方案合成一枚徽章（「签名 v1 · v2 · v3」），解析完成后出现。
+    // 签名方案合成一枚徽章（「签名 v1 · v2 · v3」），解析完成后出现；信号里只放方案名，
+    // 「签名」二字由 t! 套上，换语言跟随。
     // 不用 host_signal——它是撑满的 col，放进这一行会把整块文字区撑开。
     let signature = doc.signature;
     let schemes = Signal::map(signature, |v| {
@@ -171,11 +172,7 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         .filter(|(on, _)| *on)
         .map(|(_, n)| *n)
         .collect();
-        if names.is_empty() {
-            String::new()
-        } else {
-            format!("{} {}", tr!("tab.signature"), names.join(" · "))
-        }
+        names.join(" · ")
     });
     let version = match (&meta.version_name, meta.version_code) {
         (Some(n), Some(c)) => format!("{} ({})", n, c),
@@ -197,12 +194,15 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
             version.clone(),
         ))
         .child(
-            Element::badge_intent(schemes, Intent::Success)
-                .visible_when(move || schemes.with(|t| !t.is_empty())),
+            Element::badge_intent(
+                t!("field.signature_badge", schemes = schemes),
+                Intent::Success,
+            )
+            .visible_when(move || schemes.with(|t| !t.is_empty())),
         );
     if info.is_archive() {
         version_row = version_row.child(Element::badge_intent(
-            tr!("field.split_badge", count = info.splits.len() as i64),
+            t!("field.split_badge", count = info.splits.len() as i64),
             Intent::Primary,
         ));
         if !info.obbs.is_empty() {
@@ -269,7 +269,7 @@ fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
         .child(
             Element::button(t!("action.install"))
                 .icon_content(icons::content("play", icons::ICON_WHITE))
-                .tooltip(format!("{} (Ctrl+I)", tr!("install.install_to_device")))
+                .tooltip(t!("action.install_tooltip"))
                 .on_click({
                     let st = st.clone();
                     move |ctx| actions::open_install(&st, ctx)
@@ -280,7 +280,7 @@ fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
                 .icon_content(icons::gray("pencil"))
                 .neutral()
                 .outline_soft()
-                .tooltip(format!("{} (F2)", tr!("rename.title")))
+                .tooltip(t!("action.rename_tooltip"))
                 .on_click({
                     let st = st.clone();
                     move |ctx| actions::open_rename(&st, ctx)

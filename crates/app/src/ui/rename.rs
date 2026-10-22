@@ -11,7 +11,10 @@ use crate::state::{AppState, Doc};
 #[derive(Clone)]
 pub struct RenameState {
     pub name: Signal<String>,
-    pub error: Signal<String>,
+    /// 当前错误的译文 key（空串 = 无错误）；界面按 key 显示对应的 `t!` 文案，换语言跟随。
+    pub error: Signal<&'static str>,
+    /// 改名失败时系统返回的原始错误，代入 `rename.failed` 的 `{error}`。
+    pub error_detail: Signal<String>,
     pub focus: Signal<u64>,
     /// 正在改名的文档（打开对话框后用户可能切到别的文档，改的仍是这一个）。
     pub doc_id: std::rc::Rc<std::cell::Cell<u64>>,
@@ -21,7 +24,8 @@ impl RenameState {
     pub fn new() -> Self {
         Self {
             name: signal(String::new()),
-            error: signal(String::new()),
+            error: signal(""),
+            error_detail: signal(String::new()),
             focus: signal(0),
             doc_id: Default::default(),
         }
@@ -79,28 +83,37 @@ pub fn open(state: &AppState, doc: &Doc) {
     let rn = &state.rename;
     rn.doc_id.set(doc.id);
     rn.name.set(preset(doc, Preset::Default));
-    rn.error.set(String::new());
+    rn.error.set("");
     state.show_rename.set(true);
     rn.focus.update(|n| *n += 1);
 }
 
-/// 校验新文件名；返回错误文案。
-pub fn validate(name: &str, dir: &Path, old: &Path) -> Result<PathBuf, String> {
+/// 能显示在对话框里的错误（译文 key）。
+const ERROR_KEYS: [&str; 5] = [
+    "rename.name_cannot_be_empty",
+    "rename.invalid_chars",
+    "rename.must_end_with_apk",
+    "rename.exists",
+    "rename.failed",
+];
+
+/// 校验新文件名；返回错误的译文 key。
+pub fn validate(name: &str, dir: &Path, old: &Path) -> Result<PathBuf, &'static str> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(tr!("rename.name_cannot_be_empty"));
+        return Err("rename.name_cannot_be_empty");
     }
     if trimmed.chars().any(|c| {
         matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control()
     }) {
-        return Err(tr!("rename.invalid_chars"));
+        return Err("rename.invalid_chars");
     }
     let lower = trimmed.to_lowercase();
     if ![".apk", ".xapk", ".apkm", ".apks"]
         .iter()
         .any(|e| lower.ends_with(e))
     {
-        return Err(tr!("rename.must_end_with_apk"));
+        return Err("rename.must_end_with_apk");
     }
     // Windows 保留设备名（CON.apk 也不行）
     let stem_upper = trimmed.split('.').next().unwrap_or("").to_ascii_uppercase();
@@ -109,7 +122,7 @@ pub fn validate(name: &str, dir: &Path, old: &Path) -> Result<PathBuf, String> {
         "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if RESERVED.contains(&stem_upper.as_str()) || trimmed.ends_with('.') {
-        return Err(tr!("rename.invalid_chars"));
+        return Err("rename.invalid_chars");
     }
     let dest = dir.join(trimmed);
     // 只改大小写时在不区分大小写的文件系统上 `exists()` 为真，但那正是用户想要的改名
@@ -118,7 +131,7 @@ pub fn validate(name: &str, dir: &Path, old: &Path) -> Result<PathBuf, String> {
             .eq_ignore_ascii_case(&b.to_string_lossy())
     });
     if dest != old && !same_ignoring_case && dest.exists() {
-        return Err(tr!("rename.exists"));
+        return Err("rename.exists");
     }
     Ok(dest)
 }
@@ -150,7 +163,8 @@ fn do_rename(state: &AppState, ctx: &mut EventCtx) {
                     actions::reparse_doc(state, ctx, &doc);
                 }
                 Err(e) => {
-                    rn.error.set(tr!("rename.failed", error = e.to_string()));
+                    rn.error_detail.set(e.to_string());
+                    rn.error.set("rename.failed");
                     // 改名失败，重新解析以恢复会话、继续切换图标。
                     actions::reparse_doc(state, ctx, &doc);
                 }
@@ -174,7 +188,7 @@ pub fn build_dialog(state: &AppState) -> Element {
                 if let Some(doc) = target_doc(&st) {
                     st.rename.name.set(preset(&doc, which));
                 }
-                st.rename.error.set(String::new());
+                st.rename.error.set("");
             })
     };
 
@@ -205,16 +219,14 @@ pub fn build_dialog(state: &AppState) -> Element {
                     move |ctx| do_rename(&st, ctx)
                 }),
         )
-        .child(
-            Element::label(rn.error)
+        .children(ERROR_KEYS.into_iter().map(|key| {
+            let err = rn.error;
+            Element::label(t!(key, error = rn.error_detail))
                 .font_size(12.5)
                 .fg_role(Role::Danger)
                 .width_match()
-                .visible_when({
-                    let err = rn.error;
-                    move || err.with(|e| !e.is_empty())
-                }),
-        );
+                .visible_when(move || err.get() == key)
+        }));
 
     let footer = Element::row()
         .width_match()
@@ -234,7 +246,7 @@ pub fn build_dialog(state: &AppState) -> Element {
 
     Element::dialog_panel(
         show,
-        tr!("rename.title"),
+        t!("rename.title"),
         560,
         move |_| show.set(false),
         body,

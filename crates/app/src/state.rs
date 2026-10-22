@@ -89,6 +89,7 @@ pub struct Doc {
     /// 0 或 1 个元素：空表示尚未解析完或解析失败（给 `host_signal` 用）。
     pub info: Signal<Vec<Rc<ApkInfo>>>,
     pub parsing: Signal<bool>,
+    /// 解析失败的原始错误（空串 = 无错误）。
     pub parse_error: Signal<String>,
     /// 侧栏第二行：包名 / 「正在解析…」/ 错误。
     pub subtitle: Signal<String>,
