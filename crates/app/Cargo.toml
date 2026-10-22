@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 apkinfo-core = { path = "../core" }
-windui = "0.26"
+windui = "0.27"
 log.workspace = true
 serde.workspace = true
 toml = "0.8"
