@@ -27,6 +27,8 @@
 **包信息**
 - APK / XAPK / APKM / APKS（以及装着 APK 的 .zip）：包名、版本、SDK、权限、硬件特性、屏幕尺寸与密度、ABI、语言列表、启动 Activity
 - 归档包读取 manifest.json，列出分包（按基础 / 语言 / ABI / 密度分类）与 OBB
+- 权限表：系统官方的权限标题与说明（随界面语言），按风险分级（高风险 / 敏感 / 普通 / 系统）排序，悬停可看 Android 保护级别
+- 语言列表点开逐条列出代码、名称与自称；硬件 / 软件特性附中文说明与「必需 / 可选」；minSdk / targetSdk 悬停显示系统版本与发布时间
 - 混淆 APK 容错；应用名可在各语言之间切换；「文本信息」页提供 aapt2 `dump badging` 风格的输出
 
 **图标**
@@ -112,6 +114,13 @@ python3 scripts/sync-libchecker-rules.py      # 生成 crates/core/assets/libche
 
 没有规则包也能编译，只是库识别不可用（构建时会有 warning）。设计与匹配语义见 `docs/libchecker.md`。
 
+权限保护级别、各语言的权限文案与语言名称是生成后入库的（`crates/core/src/android/generated.rs`、
+`crates/app/i18n/android/`），换新 SDK 时重新生成一次即可，需要 aapt2 与 Node：
+
+```bash
+python3 scripts/gen-android-data.py           # 默认取 $ANDROID_HOME 下 API 最高的 android.jar
+```
+
 需要 Rust 1.85+（edition 2021，工作区使用 `std::sync::LazyLock` 等较新 API）。
 
 ```bash
@@ -130,7 +139,7 @@ cargo run -p apkinfo-core --bin apkinfo -- libs path/to/app.apk   # 命令行查
 crates/core   apkinfo-core：解析核心库（zip / axml / arsc / manifest / icon / signature / adb / installer / tools）+ apkinfo 命令行
 crates/app    apkinfoplus：windui 桌面应用（ui / state / actions / config / i18n）
 packaging/                                                 macOS Info.plist、Linux .desktop
-scripts/                                                   版本号同步、LibChecker 规则同步与各平台打包脚本
+scripts/                                                   版本号同步、LibChecker 规则同步、Android 权限 / 语言数据生成与各平台打包脚本
 docs/superpowers/specs/2026-10-21-apkinfoplus-design.md   设计文档
 docs/libchecker.md                                         库识别（LibChecker）设计
 docs/images/                                               README 截图

@@ -34,6 +34,7 @@ pub fn build(state: &AppState) -> Element {
         .child(root)
         .child(rename::build_dialog(state))
         .child(super::libs::build_dialog(state))
+        .child(super::locales::build_dialog(state))
 }
 
 /// 自绘标题栏：logo + 应用名 + 版本号 | 窗口按钮。功能都在侧栏里，这一条只管拖动与窗口操作。

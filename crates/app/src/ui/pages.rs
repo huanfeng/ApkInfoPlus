@@ -4,6 +4,7 @@
 
 use std::rc::Rc;
 
+use apkinfo_core::android::{self, PermissionRisk, Protection, ProtectionBase};
 use apkinfo_core::info::{
     format_file_size, format_file_size_full, sdk_version_text, ApkInfo, SplitType,
 };
@@ -13,6 +14,7 @@ use super::{
     copy_button, field_row, field_row_copy, field_row_custom, join_lines, mono_block, page,
     section, section_with_action, selectable_signal,
 };
+use crate::android_text;
 use crate::state::{AppState, Doc, HashState, SigState};
 use crate::theme::{CARD_BLUE, CARD_GREEN, CARD_ORANGE, CARD_PURPLE};
 
@@ -57,7 +59,11 @@ pub fn build_tabs(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element 
             icon("info"),
             overview(state, &doc, info.clone()),
         ),
-        (perm_title, icon("key"), permissions(&doc, info.clone())),
+        (
+            perm_title,
+            icon("key"),
+            permissions(state, &doc, info.clone()),
+        ),
         (
             libs_title(&doc),
             icon("blocks"),
@@ -199,24 +205,24 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
                 .collect::<Vec<_>>()
                 .join("  "),
         ));
-    // 语言列表动辄几十上百项：只显示数量，复制按钮给完整列表。
+    // 语言列表动辄几十上百项：只显示数量，点开对话框看逐条名称，复制按钮给完整列表。
+    let languages = if m.locales.is_empty() {
+        Element::label(t!("field.none"))
+            .font_size(13.0)
+            .fg_role(Role::TextSubtle)
+            .height(super::VALUE_H)
+    } else {
+        let dialog = state.locales_dialog.clone();
+        let codes = m.locales.clone();
+        Element::link(t!("field.language_count", count = m.locales.len() as i64))
+            .font_size(13.0)
+            .tooltip(t!("locale.hint"))
+            .on_click(move |_| dialog.open(codes.clone()))
+    };
     basic = basic.child(field_row_custom(
         state,
         t!("field.languages"),
-        super::plain_value(
-            Element::label(if m.locales.is_empty() {
-                t!("field.none")
-            } else {
-                t!("field.language_count", count = m.locales.len() as i64)
-            })
-            .font_size(13.0)
-            .fg_role(if m.locales.is_empty() {
-                Role::TextSubtle
-            } else {
-                Role::Text
-            })
-            .height(super::VALUE_H),
-        ),
+        super::plain_value(languages),
         Some(m.locales.join("  ")),
     ));
     let activities: Vec<String> = m
@@ -335,24 +341,73 @@ fn overview(state: &AppState, doc: &Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         .child(cert_card)
         .child(file_card);
     if !m.features.is_empty() || !m.features_not_required.is_empty() {
-        let mut feat = Element::col().width_match();
-        if !m.features.is_empty() {
-            feat = feat.child(field_row_copy(
-                state,
-                t!("field.features"),
-                m.features.join("\n"),
-            ));
-        }
-        if !m.features_not_required.is_empty() {
-            feat = feat.child(field_row_copy(
-                state,
-                t!("field.features_not_required"),
-                m.features_not_required.join("\n"),
-            ));
-        }
-        col = col.child(section("cpu", CARD_GREEN, t!("field.features"), feat));
+        col = col.child(features_card(m));
     }
     page(col)
+}
+
+/// 硬件 / 软件特性卡片：名称 | 说明 | 必需 / 可选。
+fn features_card(m: &apkinfo_core::model::ApkMeta) -> Element {
+    const NAME_W: i32 = 320;
+    let head_label = |text: windui::i18n::Message| {
+        Element::label(text)
+            .font_size(12.5)
+            .font_weight(600)
+            .fg_role(Role::TextMuted)
+    };
+    let mut table = Element::col().width_match().child(
+        Element::row()
+            .width_match()
+            .spacing(12)
+            .padding_edges(Insets::new(super::VALUE_PAD_X, 6, 8, 6))
+            .bg_role(Role::SurfaceAlt)
+            .corner(6.0)
+            .child(head_label(t!("feature_table.col_name")).width(NAME_W - super::VALUE_PAD_X))
+            .child(head_label(t!("feature_table.col_desc")).weight(1.0))
+            .child(head_label(t!("feature_table.col_required"))),
+    );
+    let rows = m
+        .features
+        .iter()
+        .map(|f| (f, true))
+        .chain(m.features_not_required.iter().map(|f| (f, false)));
+    for (name, required) in rows {
+        // 未收录的（厂商 / 第三方特性）说明栏留空，名字本身就是全部信息
+        let desc = match android_text::feature_desc(name) {
+            Some(d) => Element::label(d).font_size(13.0),
+            None => Element::leaf(),
+        };
+        let badge = if required {
+            Element::badge_intent(t!("feature_table.required"), windui::theme::Intent::Primary)
+                .tooltip(t!("feature_table.required_tip"))
+        } else {
+            Element::badge_intent(t!("feature_table.optional"), windui::theme::Intent::Neutral)
+                .tooltip(t!("feature_table.optional_tip"))
+        };
+        table = table.child(
+            Element::row()
+                .width_match()
+                .cross(Align::Center)
+                .spacing(12)
+                .padding_edges(Insets::new(0, 3, 8, 3))
+                .child(
+                    super::selectable(name.clone())
+                        .font_family(super::mono_family())
+                        .font_size(12.5)
+                        .width(NAME_W),
+                )
+                .child(desc.weight(1.0))
+                .child(badge),
+        );
+    }
+    let all: Vec<&String> = m.features.iter().chain(&m.features_not_required).collect();
+    section_with_action(
+        "cpu",
+        CARD_GREEN,
+        t!("field.features"),
+        Some(copy_button(join_lines(all))),
+        table,
+    )
 }
 
 /// 概览页的证书摘要：状态文案 + 第一个签名者的几项关键信息。
@@ -446,17 +501,188 @@ fn plain_label(text: windui::i18n::Message) -> Element {
     )
 }
 
-fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
+/// 权限表的一行：清单里的原始条目 + 拆出来的名字、maxSdk 与框架保护级别。
+#[derive(Clone, PartialEq)]
+struct PermRow {
+    entry: String,
+    name: String,
+    max_sdk: Option<u32>,
+    level: Option<Protection>,
+    risk: PermissionRisk,
+}
+
+impl PermRow {
+    fn new(entry: &str) -> Self {
+        let (name, max_sdk) = android::split_permission_entry(entry);
+        Self {
+            entry: entry.to_string(),
+            name: name.to_string(),
+            max_sdk,
+            level: android::permission_protection(name),
+            risk: android::permission_risk(name),
+        }
+    }
+
+    /// 过滤：名字、当前界面语言下的标题与说明，任一包含关键字即命中。
+    fn matches(&self, needle: &str) -> bool {
+        if needle.is_empty() || self.entry.to_lowercase().contains(needle) {
+            return true;
+        }
+        let cat = windui::i18n::current();
+        [
+            android_text::permission_label(&self.name),
+            android_text::permission_desc(&self.name),
+            Some(risk_label(self.risk)),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|m| cat.format(&m).to_lowercase().contains(needle))
+    }
+}
+
+const PERM_NAME_W: i32 = 300;
+const PERM_LEVEL_W: i32 = 76;
+/// 行尾复制按钮占的宽度，表头要空出同样的位置才对得齐。
+const PERM_COPY_W: i32 = 24;
+
+fn risk_label(risk: PermissionRisk) -> windui::i18n::Message {
+    match risk {
+        PermissionRisk::High => t!("perm.risk_high"),
+        PermissionRisk::Sensitive => t!("perm.risk_sensitive"),
+        PermissionRisk::Normal => t!("perm.risk_normal"),
+        PermissionRisk::System => t!("perm.risk_system"),
+        PermissionRisk::Unknown => t!("perm.risk_custom"),
+    }
+}
+
+fn risk_badge(ui_lang: Signal<String>, risk: PermissionRisk, level: Option<Protection>) -> Element {
+    use windui::theme::Intent;
+    let (tip, intent) = match risk {
+        PermissionRisk::High => (t!("perm.risk_tip_high"), Intent::Danger),
+        PermissionRisk::Sensitive => (t!("perm.risk_tip_sensitive"), Intent::Warning),
+        PermissionRisk::Normal => (t!("perm.risk_tip_normal"), Intent::Success),
+        PermissionRisk::System => (t!("perm.risk_tip_system"), Intent::Neutral),
+        PermissionRisk::Unknown => (t!("perm.risk_tip_custom"), Intent::Neutral),
+    };
+    let badge = Element::badge_intent(risk_label(risk), intent);
+    let Some(level) = level else {
+        return badge.tooltip(tip);
+    };
+    // 提示里补上 Android 自己的保护级别与附加标志（原名 appop、privileged…，不翻译）。
+    // 几条消息要拼起来，从 ui_lang 派生，换语言才跟随（行不会因换语言重建）
+    let level_name = match level.base() {
+        ProtectionBase::Normal => t!("perm.level_normal"),
+        ProtectionBase::Dangerous => t!("perm.level_dangerous"),
+        ProtectionBase::Signature => t!("perm.level_signature"),
+        ProtectionBase::SignatureOrSystem => t!("perm.level_signature_or_system"),
+        ProtectionBase::Internal => t!("perm.level_internal"),
+    };
+    let flags = level.flags();
+    let flags = (!flags.is_empty()).then(|| t!("perm.flags", flags = flags.join(" | ")));
+    badge.tooltip(ui_lang.map(move |_| {
+        let cat = windui::i18n::current();
+        let mut lines = vec![
+            cat.format(&tip),
+            cat.format(&t!("perm.level_line", level = cat.format(&level_name))),
+        ];
+        lines.extend(flags.iter().map(|f| cat.format(f)));
+        lines.join("\n")
+    }))
+}
+
+fn permission_row(ui_lang: Signal<String>, row: PermRow) -> Element {
+    // android.permission.* 只显示常量名，其余（应用 / 厂商自定义）显示全名
+    let shown = row
+        .name
+        .strip_prefix("android.permission.")
+        .unwrap_or(&row.name)
+        .to_string();
+    let mut name_col = Element::col().width(PERM_NAME_W).spacing(2).child(
+        super::selectable(shown)
+            .font_family(super::mono_family())
+            .font_size(12.5),
+    );
+    if let Some(max) = row.max_sdk {
+        name_col = name_col.child(super::plain_value(
+            Element::label(t!("perm.max_sdk", sdk = max as i64))
+                .font_size(11.5)
+                .fg_role(Role::TextSubtle)
+                .tooltip(t!(
+                    "perm.max_sdk_tip",
+                    sdk = max as i64,
+                    version = android_text::version_name(ui_lang, max as i64)
+                )),
+        ));
+    }
+
+    let mut desc_col = Element::col().weight(1.0).spacing(2);
+    match android_text::permission_label(&row.name) {
+        Some(label) => desc_col = desc_col.child(Element::label(label).font_size(13.0)),
+        None if row.level.is_none() => {
+            desc_col = desc_col.child(
+                Element::label(t!("perm.custom_desc"))
+                    .font_size(13.0)
+                    .fg_role(Role::TextSubtle),
+            )
+        }
+        None => {}
+    }
+    match android_text::permission_desc(&row.name) {
+        Some(desc) => {
+            desc_col = desc_col.child(
+                Element::label(desc)
+                    .font_size(12.0)
+                    .fg_role(Role::TextMuted)
+                    .width_match(),
+            )
+        }
+        None if row.level.is_some() => {
+            desc_col = desc_col.child(
+                Element::label(t!("perm.no_desc"))
+                    .font_size(12.0)
+                    .fg_role(Role::TextSubtle),
+            )
+        }
+        None => {}
+    }
+
+    Element::row()
+        .width_match()
+        .cross(Align::Center)
+        .spacing(12)
+        .padding_edges(Insets::new(2, 7, 12, 7))
+        .child(name_col)
+        .child(desc_col)
+        .child(
+            Element::row()
+                .width(PERM_LEVEL_W)
+                .child(risk_badge(ui_lang, row.risk, row.level)),
+        )
+        .child(copy_button(row.name))
+}
+
+fn permissions(state: &AppState, doc: &Doc, info: Rc<ApkInfo>) -> Element {
+    let ui_lang = state.ui_lang;
     let all = info.meta.permissions.clone();
+    // 同一权限常在 uses-permission 与 uses-permission-sdk-23 里各写一次，只留一行
+    let mut seen = std::collections::HashSet::new();
+    let mut rows: Vec<PermRow> = all
+        .iter()
+        .filter(|e| seen.insert(e.as_str()))
+        .map(|e| PermRow::new(e))
+        .collect();
+    // 风险高的排前面（同级保持清单顺序）
+    rows.sort_by_key(|r| r.risk);
+    let count_of = |risk| rows.iter().filter(|r| r.risk == risk).count() as i64;
+    let (high, sensitive) = (
+        count_of(PermissionRisk::High),
+        count_of(PermissionRisk::Sensitive),
+    );
+    let rows = Rc::new(rows);
     let filter = doc.permission_filter;
-    let all_for_list = all.clone();
-    let filtered: Signal<Vec<String>> = Signal::map(filter, move |f| {
+    let filtered: Signal<Vec<PermRow>> = Signal::map(filter, move |f| {
         let f = f.trim().to_lowercase();
-        all_for_list
-            .iter()
-            .filter(|p| f.is_empty() || p.to_lowercase().contains(&f))
-            .cloned()
-            .collect()
+        rows.iter().filter(|r| r.matches(&f)).cloned().collect()
     });
 
     let header = Element::row()
@@ -470,9 +696,25 @@ fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
                 count = Signal::map(filtered, |v| v.len() as i64)
             ))
             .font_size(12.5)
-            .fg_role(Role::TextMuted)
-            .weight(1.0),
+            .fg_role(Role::TextMuted),
         )
+        .child(
+            Element::badge_intent(
+                t!("perm.high_count", count = high),
+                windui::theme::Intent::Danger,
+            )
+            .tooltip(t!("perm.risk_tip_high"))
+            .visible(high > 0),
+        )
+        .child(
+            Element::badge_intent(
+                t!("perm.sensitive_count", count = sensitive),
+                windui::theme::Intent::Warning,
+            )
+            .tooltip(t!("perm.risk_tip_sensitive"))
+            .visible(sensitive > 0),
+        )
+        .child(Element::flex_spacer())
         .child({
             let joined = join_lines(&all);
             Element::button(t!("action.copy_all"))
@@ -486,21 +728,29 @@ fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
                 })
         });
 
+    let head_label = |text: windui::i18n::Message| {
+        Element::label(text)
+            .font_size(12.5)
+            .font_weight(600)
+            .fg_role(Role::TextMuted)
+    };
+    // 左边距与行内无框输入框的文字对齐
+    let table_head = Element::row()
+        .width_match()
+        .spacing(12)
+        .padding_edges(Insets::new(2 + super::VALUE_PAD_X, 7, 12, 7))
+        .bg_role(Role::SurfaceAlt)
+        .corner(6.0)
+        .child(head_label(t!("perm.col_name")).width(PERM_NAME_W - super::VALUE_PAD_X))
+        .child(head_label(t!("perm.col_desc")).weight(1.0))
+        .child(head_label(t!("perm.col_level")).width(PERM_LEVEL_W))
+        .child(Element::leaf().width(PERM_COPY_W))
+        .visible(!all.is_empty());
+
     let list = Element::list_signal(
         filtered,
-        |p: &String| p.clone(),
-        |p: String| {
-            Element::row()
-                .width_match()
-                .cross(Align::Center)
-                .padding_xy(12, 4)
-                .child(
-                    super::selectable(p.clone())
-                        .font_family(super::mono_family())
-                        .weight(1.0),
-                )
-                .child(copy_button(p))
-        },
+        |r: &PermRow| r.entry.clone(),
+        move |r| permission_row(ui_lang, r),
     )
     .fill();
 
@@ -526,6 +776,8 @@ fn permissions(doc: &Doc, info: Rc<ApkInfo>) -> Element {
                 .bg_role(Role::Surface)
                 .corner(super::CARD_CORNER)
                 .border_role(Role::Border, 1)
+                .padding(4)
+                .child(table_head)
                 .child(empty)
                 .child(list.weight(1.0)),
         )
@@ -899,4 +1151,27 @@ fn text_info(state: &AppState, info: Rc<ApkInfo>) -> Element {
                 ),
         )
         .child(mono_block(text, 200).weight(1.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windui::i18n::{Initial, Locales};
+
+    #[test]
+    fn permission_filter_matches_localized_label() {
+        let b = Locales::builder().embed(include_str!("../../i18n/zh-CN.toml"));
+        windui::i18n::install(
+            android_text::embed_layers(b)
+                .initial(Initial::Fixed("zh-CN".into()))
+                .build(),
+        );
+        let row = PermRow::new("android.permission.ACCESS_FINE_LOCATION (maxSdk 32)");
+        assert_eq!(row.name, "android.permission.ACCESS_FINE_LOCATION");
+        assert_eq!(row.max_sdk, Some(32));
+        assert!(row.matches("fine_location"));
+        assert!(row.matches("位置"), "按中文标题 / 说明也能筛到");
+        assert!(!row.matches("相机"));
+        assert!(row.matches("敏感"), "按风险级别文字也能筛到");
+    }
 }

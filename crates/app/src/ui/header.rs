@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use apkinfo_core::info::{format_file_size, sdk_version_text, ApkInfo};
+use apkinfo_core::info::{android_release_date, format_file_size, format_file_size_full, ApkInfo};
 use windui::prelude::*;
 
 use crate::actions;
@@ -25,7 +25,7 @@ pub fn build(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
                 .corner(super::CARD_CORNER)
                 .border_role(Role::Border, 1)
                 .child(icon_block(state, doc.clone()))
-                .child(text_block(doc.clone(), info.clone()).weight(1.0))
+                .child(text_block(state, doc.clone(), info.clone()).weight(1.0))
                 .child(action_block(state, doc)),
         )
 }
@@ -117,7 +117,8 @@ fn icon_block(state: &AppState, doc: Rc<Doc>) -> Element {
         .child(nav)
 }
 
-fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
+fn text_block(state: &AppState, doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
+    let ui_lang = state.ui_lang;
     let meta = &info.meta;
 
     // 应用名随语言选择变化：派生信号，读 label_locale 现算。
@@ -224,24 +225,46 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         ))
         .child(super::copy_button(package.clone()).visible(!package.is_empty()));
 
-    // 摘要一行只放数字，完整的 Android 版本名放在悬停提示里，免得信息少时也折成两三行。
-    let mut summary = vec![format_file_size(info.size)];
-    let mut tip = vec![format_file_size(info.size)];
+    // 摘要一行只放数字，每项悬停给出详情（SDK 的系统版本、发布时间与含义）。
+    let mut summary: Vec<(String, windui::i18n::Message)> = vec![(
+        format_file_size(info.size),
+        t!("sdk.size_tip", size = format_file_size_full(info.size)),
+    )];
     if let Some(min) = meta.min_sdk_version {
-        summary.push(format!("minSdk {}", min));
-        tip.push(format!("minSdk {}", sdk_version_text(Some(min))));
+        summary.push((
+            format!("minSdk {}", min),
+            sdk_tip(ui_lang, "sdk.min_tip", min),
+        ));
     }
     if let Some(t) = meta.target_sdk_version {
-        summary.push(format!("targetSdk {}", t));
-        tip.push(format!("targetSdk {}", sdk_version_text(Some(t))));
-    }
-    if let Some(c) = meta.compile_sdk_version {
-        tip.push(format!("compileSdk {}", sdk_version_text(Some(c))));
+        summary.push((
+            format!("targetSdk {}", t),
+            sdk_tip(ui_lang, "sdk.target_tip", t),
+        ));
     }
     if !meta.native_codes.is_empty() {
-        summary.push(meta.native_codes.join(", "));
-        tip.push(meta.native_codes.join(", "));
+        let abi = meta.native_codes.join(", ");
+        summary.push((abi.clone(), t!("sdk.abi_tip", abi = abi)));
     }
+    // 每项做成淡底小胶囊：看得出是独立的一块、悬停有详情。放不下时整块折到下一行。
+    let summary_row = Element::flow()
+        .width_match()
+        .spacing(6)
+        .run_spacing(4)
+        .children(summary.into_iter().map(|(text, tip)| {
+            Element::row()
+                .cross(Align::Center)
+                .padding_xy(7, 2)
+                .corner(5.0)
+                .bg_role(Role::SurfaceAlt)
+                .border_role(Role::Border, 1)
+                .tooltip(tip)
+                .child(
+                    Element::label(text)
+                        .font_size(12.0)
+                        .fg_role(Role::TextMuted),
+                )
+        }));
 
     Element::col()
         .width_match()
@@ -249,14 +272,22 @@ fn text_block(doc: Rc<Doc>, info: Rc<ApkInfo>) -> Element {
         .child(name_row)
         .child(package_row)
         .child(version_row)
-        .child(
-            Element::label(summary.join("  ·  "))
-                .font_size(12.5)
-                .fg_role(Role::TextSubtle)
-                .max_lines(1)
-                .truncate(Truncate::End)
-                .tooltip(tip.join("\n")),
-        )
+        .child(summary_row)
+}
+
+/// SDK 悬停提示：API 级别、对应的系统版本与发布时间、这一项的含义。
+fn sdk_tip(ui_lang: Signal<String>, key: &'static str, api: i64) -> windui::i18n::Message {
+    use windui::i18n::Message;
+    let version = crate::android_text::version_name(ui_lang, api);
+    match android_release_date(api) {
+        Some(date) => Message::new(key)
+            .set("api", api)
+            .set("version", version)
+            .set("date", date),
+        None => Message::new(format!("{key}_nodate"))
+            .set("api", api)
+            .set("version", version),
+    }
 }
 
 /// 右侧动作：纵向一列——安装（主操作）· 重命名 · 更多（重新解析 / 导出 / 路径 / 关闭都在菜单里）。

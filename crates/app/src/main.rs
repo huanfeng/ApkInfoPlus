@@ -2,6 +2,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod actions;
+mod android_text;
 mod assoc;
 mod config;
 mod i18n_tests;
@@ -70,7 +71,8 @@ fn main() {
         .embed(include_str!("../i18n/zh-TW.toml"))
         .embed(include_str!("../i18n/zh-HK.toml"))
         .embed(include_str!("../i18n/ja.toml"))
-        .embed(include_str!("../i18n/ko.toml"))
+        .embed(include_str!("../i18n/ko.toml"));
+    let locales = android_text::embed_layers(locales)
         .fallback("en")
         .initial(if cfg.language == "auto" {
             Initial::System

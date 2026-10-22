@@ -208,6 +208,12 @@ fn apply_language(state: &AppState, lang: &str) {
     } else {
         state.locale.set(lang);
     }
+    state.ui_lang.set(state.locale.language());
+    // 权限 / 语言列表按当前语言的文案过滤，过滤结果从过滤词派生：碰一下过滤词让列表按新语言重筛
+    for doc in state.docs.get() {
+        doc.permission_filter.update(|_| {});
+    }
+    state.locales_dialog.filter.update(|_| {});
 }
 
 pub fn apply_theme(state: &AppState) {

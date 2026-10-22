@@ -5,6 +5,7 @@
 pub mod header;
 pub mod install;
 pub mod libs;
+pub mod locales;
 pub mod main_window;
 pub mod pages;
 pub mod rename;

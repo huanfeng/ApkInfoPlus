@@ -257,6 +257,7 @@ pub struct AppState {
     pub install: crate::ui::install::InstallState,
     pub rename: crate::ui::rename::RenameState,
     pub lib_detail: crate::ui::libs::DetailState,
+    pub locales_dialog: crate::ui::locales::LocalesState,
     pub rules_update: crate::ui::libs::RulesUpdateState,
     pub download: crate::ui::settings::DownloadState,
 
@@ -265,6 +266,9 @@ pub struct AppState {
     pub tx: Sender<Msg>,
     pub theme: ThemeHandle,
     pub locale: LocaleHandle,
+    /// 当前界面语言。运行时数据拼出来的文案（语言名称这类）由它派生，换语言才会跟随——
+    /// `t!` 只能翻译整条 key，拼接结果不会自己刷新。
+    pub ui_lang: Signal<String>,
 }
 
 pub const APP_TITLE: &str = "APK Info Plus";
@@ -280,6 +284,7 @@ impl AppState {
             install,
             rename: crate::ui::rename::RenameState::new(),
             lib_detail: crate::ui::libs::DetailState::new(),
+            locales_dialog: crate::ui::locales::LocalesState::new(),
             rules_update: crate::ui::libs::RulesUpdateState::new(),
             download: crate::ui::settings::DownloadState::new(),
             docs: signal(Vec::new()),
@@ -299,6 +304,7 @@ impl AppState {
             config: Rc::new(RefCell::new(config)),
             tx,
             theme,
+            ui_lang: signal(locale.language()),
             locale,
         }
     }
