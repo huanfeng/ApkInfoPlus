@@ -1003,28 +1003,43 @@ mod tests {
         };
         let has = |texts: &[String], s: &str| texts.iter().any(|t| t == s);
 
+        // macOS 用系统标题栏（不画自绘标题），也不支持在这里注册文件关联：只断言该平台真会画的字
+        let mac = cfg!(target_os = "macos");
+        let assoc = crate::assoc::is_supported();
+        let expect = |all: &[&'static str], titled: &'static str, assoc_only: &[&'static str]| {
+            let mut v: Vec<&'static str> = all.to_vec();
+            if !mac {
+                v.push(titled);
+            }
+            if assoc {
+                v.extend_from_slice(assoc_only);
+            }
+            v
+        };
+
         let zh = paint(&mut tree);
-        for want in [
+        for want in expect(
+            &["文件关联"],
             "设置",
-            "文件关联",
-            "文件类型",
-            "状态",
-            "关联到本程序",
-            "取消关联",
-        ] {
+            &["文件类型", "状态", "关联到本程序", "取消关联"],
+        ) {
             assert!(has(&zh, want), "中文界面缺「{want}」: {zh:?}");
         }
-        assert!(has(&zh, "已关联到本程序") || has(&zh, "未关联"), "{zh:?}");
+        if assoc {
+            assert!(has(&zh, "已关联到本程序") || has(&zh, "未关联"), "{zh:?}");
+        }
 
         assert!(locale.set("en"));
         let en = paint(&mut tree);
-        for want in ["Settings", "File association", "File types", "Status"] {
+        for want in expect(&["File association"], "Settings", &["File types", "Status"]) {
             assert!(has(&en, want), "英文界面缺「{want}」: {en:?}");
         }
-        assert!(
-            has(&en, "Associated with this app") || has(&en, "Not associated"),
-            "{en:?}"
-        );
+        if assoc {
+            assert!(
+                has(&en, "Associated with this app") || has(&en, "Not associated"),
+                "{en:?}"
+            );
+        }
         for stale in zh
             .iter()
             .filter(|t| t.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)))
