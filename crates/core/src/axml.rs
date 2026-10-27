@@ -512,14 +512,23 @@ struct RawAttr {
 }
 
 /// 读取元素头里的属性扩展与全部原始属性。
-/// 混淆 APK 可能把 attrSize 改大（如 24），必须按实际大小跳过额外填充字节。
+/// 混淆 APK 可能把 attrSize 改大（如 24），必须按实际大小跳过额外填充字节；
+/// 还可能把属性数组挪离 attrExt 头部（issue #1 样本：attributeStart=181，
+/// 中间塞满 0xffffffff 填充），位置由 attributeStart 指定，必须跟随该字段读取。
 fn read_raw_attrs(r: &mut ByteReader) -> Result<Vec<RawAttr>, AxmlError> {
+    let attr_ext_base = r.pos() - 8; // 调用方已读过 ns 与 name，attrExt 起点在 8 字节之前
     let marker = r.u32()?;
-    // marker 低 16 位 attrStart、高 16 位 attrSize；标准值 0x00140014
+    // marker 低 16 位 attrStart（属性数组相对 attrExt 的偏移）、高 16 位 attrSize；标准值 0x00140014
+    let attr_start = (marker & 0xFFFF) as usize;
     let attr_size = ((marker >> 16) & 0xFFFF) as usize;
     let extra = attr_size.saturating_sub(STD_ATTR_SIZE);
     let count = r.u16()? as usize;
     r.skip(6)?; // idIndex / classIndex / styleIndex
+
+    // 属性数组被挪走时跟随 attributeStart 定位；标准位置（<=20）原字节序读取已是该处
+    if attr_start > STD_ATTR_SIZE && attr_ext_base + attr_start < r.len() {
+        r.seek(attr_ext_base + attr_start);
+    }
 
     let mut attrs = Vec::with_capacity(count.min(r.remain() / STD_ATTR_SIZE));
     for _ in 0..count {
@@ -754,7 +763,7 @@ fn write_start_tag(
     let name = resolve_name(strings, res_map, r.i32()?);
     out.push_str(if name.is_empty() { "unknown" } else { &name });
 
-    // 文本模式与 Dart 一致不做移位恢复，只逐条格式化；但同样跳过额外填充字节，避免错位
+    // 文本模式与 Dart 一致不做移位恢复，只逐条格式化；但同样跟随 attributeStart 并跳过填充，避免错位
     for a in read_raw_attrs(r)? {
         out.push('\n');
         indent(out, ident * IDENT_SIZE + ATTR_IDENT_SIZE);
@@ -837,6 +846,36 @@ pub(crate) mod tests {
         }
         fn start(&mut self, name: &str, attrs: &[Attr]) {
             self.start_raw(name, attrs, 20, &[]);
+        }
+        /// 模拟 issue #1 混淆：属性数组挪离 attrExt 头部，指定偏移，中间填 `padding`。
+        fn start_relocated(&mut self, name: &str, attrs: &[Attr], padding: &[u8]) {
+            let name = self.idx(name);
+            let attr_start = 20 + padding.len();
+            let size = 16 + 20 + padding.len() + attrs.len() * 20;
+            let b = &mut self.body;
+            push_u16(b, START_ELEMENT_TAG);
+            push_u16(b, 16);
+            push_u32(b, size as u32);
+            push_u32(b, 1); // line
+            push_u32(b, 0xffff_ffff); // comment
+            push_u32(b, 0xffff_ffff); // ns
+            push_u32(b, name as u32);
+            push_u16(b, attr_start as u16);
+            push_u16(b, 20); // attrSize
+            push_u16(b, attrs.len() as u16);
+            push_u16(b, 0);
+            push_u16(b, 0);
+            push_u16(b, 0);
+            b.extend_from_slice(padding);
+            for &(ns, an, raw, ty, data) in attrs {
+                push_u32(b, ns as u32);
+                push_u32(b, an as u32);
+                push_u32(b, raw as u32);
+                push_u16(b, 8);
+                b.push(0);
+                b.push(ty);
+                push_u32(b, data);
+            }
         }
         fn start_raw(&mut self, name: &str, attrs: &[Attr], attr_size: u16, trailer: &[u8]) {
             let name = self.idx(name);
@@ -1139,6 +1178,27 @@ pub(crate) mod tests {
         let m = &doc.children[0];
         assert_eq!(m.attr("versionCode"), Some("7"));
         assert_eq!(m.attr("label"), Some("0xff"));
+    }
+
+    #[test]
+    fn follows_relocated_attribute_start() {
+        let mut b = manifest_builder();
+        let val = b.idx("com.example.app");
+        // issue #1 混淆：属性数组挪出 attrExt 头部（偏移 185 为奇数，属性不对齐），
+        // 中间塞满 0xffffffff 填充，真实位置只由 attributeStart 指明
+        b.start_relocated(
+            "manifest",
+            &[
+                (-1, 2, val, RES_TYPE_STRING, val as u32),
+                (6, 0, -1, RES_TYPE_INT_DEC, 320),
+            ],
+            &[0xffu8; 165],
+        );
+        b.end("manifest");
+        let doc = parse_document(&b.build()).unwrap();
+        let m = &doc.children[0];
+        assert_eq!(m.attr("package"), Some("com.example.app"));
+        assert_eq!(m.attr("versionCode"), Some("320"));
     }
 
     #[test]
