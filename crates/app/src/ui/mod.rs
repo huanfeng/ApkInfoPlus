@@ -28,6 +28,10 @@ pub const CARD_PAD: i32 = 12;
 pub const SCROLL_GUTTER: i32 = 10;
 /// 卡片圆角。
 pub const CARD_CORNER: f32 = 12.0;
+/// 标签卡片滚动视口的底部内缩：内容在卡片内侧已缩 TAB_PAD，圆角弧线横向收缩
+/// 超过 TAB_PAD 时内容才会画进楔形区，该高度为 `r − √(r² − (r − TAB_PAD)²)`
+/// ≈ 0.7px，再加抗锯齿余量取 3px。之前误取整段圆角（13px），底部空隙偏大。
+pub const CORNER_CLEAR: i32 = 3;
 
 /// 可选中、可复制的单行文本：无框只读输入框。过长时随光标横向滚动，不撑破布局；
 /// 右键有内建的复制菜单。
@@ -304,19 +308,28 @@ pub fn section_with_action(
 
 /// 页面骨架：可滚动 + 统一内边距。
 pub fn page(body: Element) -> Element {
-    Element::scroll().fill().child(
-        Element::col()
-            .width_match()
-            // 已在标签卡片里：四周只留一圈窄边，右侧另让出滚动条。
-            .padding_edges(Insets::new(
-                TAB_PAD,
-                TAB_PAD,
-                TAB_PAD + SCROLL_GUTTER,
-                TAB_PAD,
-            ))
-            .spacing(CARD_GAP)
-            .child(body),
-    )
+    Element::col()
+        .fill()
+        // 底部让出圆角楔形：滚动视口按矩形裁剪内容，贴到卡片底边时，滚动中的
+        // 内层卡片会画进外卡片圆角收进去的区域（切线以下两边露白）。把视口底边
+        // 收到楔形区之上即可避开；露出的这一圈是卡片自己的底色，与滚到底时内容
+        // 下方的留白（内容里的 TAB_PAD）观感一致。
+        .padding_edges(Insets::new(0, 0, 0, CORNER_CLEAR))
+        .child(
+            Element::scroll().width_match().weight(1.0).child(
+                Element::col()
+                    .width_match()
+                    // 已在标签卡片里：四周只留一圈窄边，右侧另让出滚动条。
+                    .padding_edges(Insets::new(
+                        TAB_PAD,
+                        TAB_PAD,
+                        TAB_PAD + SCROLL_GUTTER,
+                        TAB_PAD,
+                    ))
+                    .spacing(CARD_GAP)
+                    .child(body),
+            ),
+        )
 }
 
 /// 等宽、可选中复制的多行文本块（哈希、文本信息、签名指纹）。
