@@ -189,7 +189,10 @@ pub fn open(state: &AppState, ctx: &mut EventCtx) {
     let Some(active) = state.active_doc() else {
         return;
     };
-    if active.current_info().is_none() {
+    if !active
+        .current_info()
+        .is_some_and(|info| info.kind.is_installable())
+    {
         return;
     }
     let ins = &state.install;
@@ -206,7 +209,7 @@ pub fn open(state: &AppState, ctx: &mut EventCtx) {
     let rows: Vec<FileRow> = scope.collect(|| {
         docs.iter()
             .filter_map(|d| {
-                let info = d.current_info()?;
+                let info = d.current_info().filter(|info| info.kind.is_installable())?;
                 let label = d.display_label();
                 let file_name = d.file_name();
                 let version = info.meta.version_name.clone().unwrap_or_default();
@@ -1295,6 +1298,6 @@ fn log_section(state: &AppState) -> Element {
                 .font_weight(600)
                 .fg_role(Role::TextMuted),
         )
-        .child(crate::ui::mono_block(log, 110))
+        .child(crate::ui::readonly_text_block(log, 110).font_family(super::mono_family()))
         .visible_when(move || log.with(|l| !l.is_empty()))
 }

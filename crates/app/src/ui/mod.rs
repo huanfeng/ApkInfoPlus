@@ -54,12 +54,12 @@ pub fn selectable_signal(text: Signal<String>) -> Element {
         .height(VALUE_H)
 }
 
-/// 文件格式对应的固定颜色：APK 蓝 / XAPK 紫 / APKM 橙 / APKS 绿，侧栏与概览头共用。
+/// 文件格式对应的固定颜色：APK 蓝 / XAPK 紫 / APKM 橙 / APKS 绿 / AAB 紫，侧栏与概览头共用。
 pub fn kind_color(kind: apkinfo_core::info::ArchiveKind) -> Color {
     use apkinfo_core::info::ArchiveKind;
     match kind {
         ArchiveKind::Apk => crate::theme::CARD_BLUE,
-        ArchiveKind::Xapk => crate::theme::CARD_PURPLE,
+        ArchiveKind::Xapk | ArchiveKind::Aab => crate::theme::CARD_PURPLE,
         ArchiveKind::Apkm => crate::theme::CARD_ORANGE,
         ArchiveKind::Apks => crate::theme::CARD_GREEN,
         _ => crate::icons::ICON_GRAY,
@@ -333,13 +333,12 @@ pub fn page(body: Element) -> Element {
 }
 
 /// 等宽、可选中复制的多行文本块（哈希、文本信息、签名指纹）。
-pub fn mono_block(text: Signal<String>, min_height: i32) -> Element {
+pub fn readonly_text_block(text: Signal<String>, min_height: i32) -> Element {
     Element::text_input(text, "")
         .multiline()
         .read_only()
         .wrap(false)
         .select_range(0, 0)
-        .font_family(mono_family())
         .font_size(12.5)
         .width_match()
         .height(min_height)

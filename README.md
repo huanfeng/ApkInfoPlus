@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/huanfeng/ApkInfoPlus)](https://github.com/huanfeng/ApkInfoPlus/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-轻量、跨平台（Windows / macOS / Linux）的 Android 安装包查看与安装工具。拖一个 APK / XAPK / APKM / APKS 进来，
+轻量、跨平台（Windows / macOS / Linux）的 Android 安装包查看与安装工具。拖一个 APK / XAPK / APKM / APKS / AAB 进来，
 包信息、图标、权限、签名证书、用到的第三方 SDK 一眼看全，还能直接装到手机上。
 
 由 Flutter 版 [ApkInfoTool](https://github.com/huanfeng/ApkInfoTool) 用 Rust + [windui](https://github.com/huanfeng/wind-ui-rust) 重写而来：
@@ -25,7 +25,8 @@
 ## 功能
 
 **包信息**
-- APK / XAPK / APKM / APKS（以及装着 APK 的 .zip）：包名、版本、SDK、权限、硬件特性、屏幕尺寸与密度、ABI、语言列表、启动 Activity
+- APK / XAPK / APKM / APKS / AAB（以及装着 APK 的 .zip）：包名、版本、SDK、权限、硬件特性、屏幕尺寸与密度、ABI、语言列表、启动 Activity
+- AAB 直接在本地解析，支持查看模块中的 DEX、原生库和组件。AAB 仅用于查看，安装入口适用于 APK 及 APK 归档。
 - 归档包读取 manifest.json，列出分包（按基础 / 语言 / ABI / 密度分类）与 OBB
 - 权限表：系统官方的权限标题与说明（随界面语言），按风险分级（高风险 / 敏感 / 普通 / 系统）排序，悬停可看 Android 保护级别
 - 语言列表点开逐条列出代码、名称与自称；硬件 / 软件特性附中文说明与「必需 / 可选」；minSdk / targetSdk 悬停显示系统版本与发布时间

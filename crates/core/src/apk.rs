@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use crate::arsc::ResourceTable;
 use crate::axml;
 use crate::dex::DexInfo;
-use crate::info::{native_libs_from_entries, NativeLib};
+use crate::info::{native_libs_from_entries, ArchiveKind, NativeLib};
 use crate::manifest;
 use crate::model::{ApkMeta, ResourceInfo};
 use crate::zip::{Archive, ReadSeek, ZipError};
@@ -27,13 +27,18 @@ pub struct ApkReader {
     archive: Mutex<Archive<Box<dyn ReadSeek>>>,
     files: Vec<String>,
     table: Option<ResourceTable>,
+    is_bundle: bool,
+    bundle_resources: BTreeMap<u32, ResourceInfo>,
 }
 
 impl ApkReader {
     /// 从文件路径打开。
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ApkError> {
+        let path = path.as_ref();
         let file = std::fs::File::open(path).map_err(ZipError::from)?;
-        Self::from_reader(Box::new(std::io::BufReader::new(file)))
+        let mut reader = Self::from_reader(Box::new(std::io::BufReader::new(file)))?;
+        reader.is_bundle = ArchiveKind::from_path(path) == ArchiveKind::Aab;
+        Ok(reader)
     }
 
     /// 从内存字节打开（归档包里的 base.apk 等）。
@@ -48,12 +53,17 @@ impl ApkReader {
             archive: Mutex::new(archive),
             files,
             table: None,
+            is_bundle: false,
+            bundle_resources: BTreeMap::new(),
         })
     }
 
     /// 解析基础信息。无 AndroidManifest.xml 或其无法解码时返回 `None`；
     /// resources.arsc 解析失败不致命，只是缺少应用名 / 图标 / locale 等。
     pub fn parse(&mut self) -> Option<ApkMeta> {
+        if self.is_bundle {
+            return self.parse_bundle();
+        }
         let manifest_bytes = self.read_file(MANIFEST)?;
         let doc = match axml::parse_document(&manifest_bytes) {
             Ok(d) => d,
@@ -81,7 +91,77 @@ impl ApkReader {
         Some(meta)
     }
 
-    /// `parse` 之后可用的资源表。
+    fn parse_bundle(&mut self) -> Option<ApkMeta> {
+        let root = crate::aab::xml_root(&self.read_file(crate::aab::MANIFEST)?)?;
+        if root.name != "manifest" {
+            return None;
+        }
+        let mut doc = axml::XmlElement {
+            children: vec![root],
+            ..Default::default()
+        };
+        // Base 决定包级元数据。功能模块的组件、权限和特性并入清单供现有分析器使用。
+        for (module, path) in self.files.iter().filter_map(|path| {
+            let module = path.strip_suffix("/manifest/AndroidManifest.xml")?;
+            (module != "base" && !module.contains('/')).then_some((module, path))
+        }) {
+            let Some(feature) = self
+                .read_file(path)
+                .as_deref()
+                .and_then(crate::aab::xml_root)
+            else {
+                log::warn!("bundle manifest unreadable: {module}");
+                continue;
+            };
+            let base = &mut doc.children[0];
+            if feature.name != "manifest" || feature.attr("package") != base.attr("package") {
+                continue;
+            }
+            for node in feature.children {
+                if node.name == "application" {
+                    if let Some(app) = base.children.iter_mut().find(|c| c.name == "application") {
+                        app.children.extend(node.children.into_iter().filter(|c| {
+                            crate::model::ComponentKind::from_element(&c.name).is_some()
+                        }));
+                    }
+                } else if matches!(
+                    node.name.as_str(),
+                    "uses-permission" | "uses-permission-sdk-23" | "uses-feature"
+                ) && !base.children.contains(&node)
+                {
+                    base.children.push(node);
+                }
+            }
+        }
+        let mut meta = manifest::parse_manifest(&doc);
+        meta.native_codes = self
+            .native_libs()
+            .into_iter()
+            .map(|lib| lib.abi)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        self.bundle_resources.clear();
+        // Base 的资源优先，功能模块补充额外资源和配置。
+        let tables = std::iter::once(("base", "base/resources.pb")).chain(
+            self.files.iter().filter_map(|p| {
+                let module = p.strip_suffix("/resources.pb")?;
+                (!module.contains('/') && module != "base").then_some((module, p.as_str()))
+            }),
+        );
+        for (module, path) in tables {
+            if let Some(bytes) = self.read_file(path) {
+                if crate::aab::resources(&bytes, module, &mut meta, &mut self.bundle_resources)
+                    .is_none()
+                {
+                    log::warn!("bundle resources unreadable: {path}");
+                }
+            }
+        }
+        Some(meta)
+    }
+
+    /// `parse` 之后可用的 APK 资源表。
     pub fn resource_table(&self) -> Option<&ResourceTable> {
         self.table.as_ref()
     }
@@ -90,10 +170,14 @@ impl ApkReader {
     /// 调用方把需要的东西取走之后就该放掉。
     pub fn release_resource_table(&mut self) {
         self.table = None;
+        self.bundle_resources.clear();
     }
 
     /// 全部资源条目（按 ID 聚合）；资源表不可用时为空。
     pub fn resources(&self) -> BTreeMap<u32, ResourceInfo> {
+        if self.is_bundle {
+            return self.bundle_resources.clone();
+        }
         self.table
             .as_ref()
             .map(ResourceTable::all_resources)
@@ -102,6 +186,9 @@ impl ApkReader {
 
     /// 同 [`resources`](Self::resources)，字符串值按 [`ResourceTable::resources_with`] 过滤。
     pub fn resources_with(&self, keep: impl Fn(&str, &str) -> bool) -> BTreeMap<u32, ResourceInfo> {
+        if self.is_bundle {
+            return self.bundle_resources.clone();
+        }
         self.table
             .as_ref()
             .map(|t| t.resources_with(keep))
@@ -124,14 +211,41 @@ impl ApkReader {
     /// `lib/<abi>/*.so` 条目清单。
     pub fn native_libs(&self) -> Vec<NativeLib> {
         let mut archive = self.archive.lock().unwrap_or_else(|e| e.into_inner());
-        native_libs_from_entries(archive.file_sizes(), None)
+        let files = archive.file_sizes();
+        if self.is_bundle {
+            let mut modules = BTreeMap::<_, Vec<_>>::new();
+            for (path, size) in files {
+                if let Some((module, entry)) = path.split_once('/') {
+                    if entry.starts_with("lib/") {
+                        modules
+                            .entry(module.to_owned())
+                            .or_default()
+                            .push((entry.to_owned(), size));
+                    }
+                }
+            }
+            return modules
+                .into_iter()
+                .flat_map(|(module, entries)| native_libs_from_entries(entries, Some(&module)))
+                .collect();
+        }
+        native_libs_from_entries(files, None)
     }
 
     /// 扫描根目录的 `classes*.dex`；一个都没有（或都不是合法 dex）时为 `None`。
     /// 一次只在内存里放一个 dex。
     pub fn dex_info(&self) -> Option<DexInfo> {
         let mut info = DexInfo::default();
-        for name in self.files.iter().filter(|n| crate::dex::is_dex_entry(n)) {
+        for name in self.files.iter().filter(|name| {
+            let entry = if self.is_bundle {
+                name.split_once('/')
+                    .and_then(|(_, p)| p.strip_prefix("dex/"))
+                    .unwrap_or_default()
+            } else {
+                name.as_str()
+            };
+            crate::dex::is_dex_entry(entry)
+        }) {
             if let Some(bytes) = self.read_file(name) {
                 if !info.add_dex(&bytes) {
                     log::warn!("{name} is not a valid dex");
@@ -161,7 +275,7 @@ impl ApkReader {
 }
 
 /// 解析 `@res/0x...` 引用；格式不符返回 `None`。
-fn parse_res_ref(value: &str) -> Option<u32> {
+pub(crate) fn parse_res_ref(value: &str) -> Option<u32> {
     u32::from_str_radix(value.strip_prefix("@res/0x")?, 16).ok()
 }
 

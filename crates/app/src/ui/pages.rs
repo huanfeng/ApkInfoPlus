@@ -11,7 +11,7 @@ use apkinfo_core::info::{
 use windui::prelude::*;
 
 use super::{
-    copy_button, field_row, field_row_copy, field_row_custom, join_lines, mono_block, page,
+    copy_button, field_row, field_row_copy, field_row_custom, join_lines, readonly_text_block, page,
     section, section_with_action, selectable_signal,
 };
 use crate::android_text;
@@ -1116,6 +1116,13 @@ fn hashes(state: &AppState, doc: &Doc) -> Element {
 fn text_info(state: &AppState, info: Rc<ApkInfo>) -> Element {
     let text = signal(info.text_info.clone());
     let copy_text = info.text_info.clone();
+    // 等宽字体回退时可能绘制错误字形，含多语言字符的文本沿用界面的默认字体。
+    let body = readonly_text_block(text, 200);
+    let body = if copy_text.is_ascii() {
+        body.font_family(super::mono_family())
+    } else {
+        body
+    };
     let _ = state;
     Element::col()
         .fill()
@@ -1150,7 +1157,7 @@ fn text_info(state: &AppState, info: Rc<ApkInfo>) -> Element {
                         }),
                 ),
         )
-        .child(mono_block(text, 200).weight(1.0))
+        .child(body.weight(1.0))
 }
 
 #[cfg(test)]

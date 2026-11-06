@@ -43,6 +43,7 @@
 				<string>xapk</string>
 				<string>apkm</string>
 				<string>apks</string>
+				<string>aab</string>
 			</array>
 			<key>LSItemContentTypes</key>
 			<array>
@@ -50,6 +51,7 @@
 				<string>to.feng.apkinfoplus.xapk</string>
 				<string>to.feng.apkinfoplus.apkm</string>
 				<string>to.feng.apkinfoplus.apks</string>
+				<string>to.feng.apkinfoplus.aab</string>
 			</array>
 		</dict>
 	</array>
@@ -125,6 +127,23 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>apks</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>to.feng.apkinfoplus.aab</string>
+			<key>UTTypeDescription</key>
+			<string>Android App Bundle</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>aab</string>
 				</array>
 			</dict>
 		</dict>

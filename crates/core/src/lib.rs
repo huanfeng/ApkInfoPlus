@@ -3,6 +3,7 @@
 //! 模块按解析流水线组织：`zip` 读包 → `axml` / `arsc` 解二进制格式 → `manifest` 产出
 //! [`model::ApkMeta`] → `apk` 汇总。上层应用只消费 `info::ApkInfo`。
 
+pub mod aab;
 pub mod adb;
 pub mod android;
 pub mod apk;

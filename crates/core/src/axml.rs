@@ -678,7 +678,7 @@ fn format_value(
         RES_TYPE_ATTRIBUTE => format!("@attr/0x{:x}", data as u32),
         RES_TYPE_STRING => safe_get(strings, raw_index).to_string(),
         RES_TYPE_FLOAT => dart_double(f32::from_bits(u) as f64),
-        RES_TYPE_DIMENSION => format!("{}{}", dart_double(complex_value(u)), dimension_unit(u)),
+        RES_TYPE_DIMENSION => format_dimension(u),
         RES_TYPE_FRACTION => format!("{}{}", dart_double(complex_value(u)), fraction_unit(u)),
         RES_TYPE_DYNAMIC_REFERENCE => format!("@dyn/0x{:x}", data as u32),
         RES_TYPE_INT_DEC => data.to_string(),
@@ -719,6 +719,14 @@ pub(crate) fn dart_double(v: f64) -> String {
 fn complex_value(data: u32) -> f64 {
     let mantissa = (data & 0xffff_ff00) as f64;
     mantissa * RADIX_MULTS[((data >> 4) & 0x3) as usize]
+}
+
+pub(crate) fn format_dimension(value: u32) -> String {
+    format!(
+        "{}{}",
+        dart_double(complex_value(value)),
+        dimension_unit(value)
+    )
 }
 
 fn dimension_unit(data: u32) -> &'static str {

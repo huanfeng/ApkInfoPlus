@@ -65,7 +65,7 @@ pub fn is_supported_file(path: &Path) -> bool {
         .file_name()
         .map(|n| n.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if [".apk", ".xapk", ".apkm", ".apks", ".zip"]
+    if [".apk", ".xapk", ".apkm", ".apks", ".aab", ".zip"]
         .iter()
         .any(|e| name.ends_with(e))
     {
@@ -80,7 +80,7 @@ pub fn is_supported_file(path: &Path) -> bool {
             break;
         }
     }
-    [".apk", ".xapk", ".apkm", ".apks"]
+    [".apk", ".xapk", ".apkm", ".apks", ".aab"]
         .iter()
         .any(|e| rest.ends_with(e))
 }
@@ -95,7 +95,7 @@ pub fn pick_file(state: &AppState, ctx: &mut EventCtx) {
         .title(tr!("open.select_apk_file"))
         .filter(
             tr!("open.filter_name"),
-            &["apk", "xapk", "apkm", "apks", "zip"],
+            &["apk", "xapk", "apkm", "apks", "aab", "zip"],
         )
         .filter(tr!("open.all_files"), &["*"]);
     let last = state.cfg(|c| c.last_dir.clone());
@@ -955,6 +955,7 @@ mod tests {
         assert!(is_supported_file(Path::new("a.apk.1")));
         assert!(is_supported_file(Path::new("a.apkm.2.3")));
         assert!(is_supported_file(Path::new("a.zip")));
+        assert!(is_supported_file(Path::new("a.AAB.1")));
         assert!(!is_supported_file(Path::new("a.txt")));
         assert!(!is_supported_file(Path::new("apk")));
     }

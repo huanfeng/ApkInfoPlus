@@ -1,9 +1,9 @@
 //! 命令行入口：开发期对照 aapt2 用。
 //!
 //! ```text
-//! apkinfo <file.apk>                 # aapt2 dump badging 风格摘要
+//! apkinfo <file.apk|file.aab>                 # aapt2 dump badging 风格摘要
 //! apkinfo xml <file.apk> [entry]     # 解码二进制 XML（默认 AndroidManifest.xml）
-//! apkinfo res <file.apk>             # 列出资源表全部条目
+//! apkinfo res <file.apk|file.aab>             # 列出资源表全部条目
 //! apkinfo libs <file>                # LibChecker 库识别（需内嵌规则包，APK 与归档包都行）
 //! ```
 
@@ -14,7 +14,7 @@ use apkinfo_core::apk::ApkReader;
 use apkinfo_core::axml;
 use apkinfo_core::model::ApkMeta;
 
-const USAGE: &str = "usage:\n  apkinfo <file.apk>\n  apkinfo xml <file.apk> [entry]\n  apkinfo res <file.apk>\n  apkinfo libs <file>";
+const USAGE: &str = "usage:\n  apkinfo <file.apk|file.aab>\n  apkinfo xml <file.apk> [entry]\n  apkinfo res <file.apk|file.aab>\n  apkinfo libs <file>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -70,11 +70,12 @@ fn cmd_xml(path: &str, entry: &str) -> Result<String, String> {
 fn cmd_res(path: &str) -> Result<String, String> {
     let mut reader = open(path)?;
     reader.parse();
-    if reader.resource_table().is_none() {
-        return Err("resources.arsc not available".into());
+    let resources = reader.resources();
+    if resources.is_empty() && reader.resource_table().is_none() {
+        return Err("resource table not available".into());
     }
     let mut out = String::new();
-    for info in reader.resources().values() {
+    for info in resources.values() {
         let refs: Vec<String> = info
             .references
             .iter()

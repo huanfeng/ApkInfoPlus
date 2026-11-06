@@ -20,6 +20,8 @@ pub enum LoadError {
     Zip(String),
     #[error("AndroidManifest.xml not found or unreadable")]
     NoManifest,
+    #[error("AAB base/manifest/AndroidManifest.xml not found or unreadable")]
+    NoBundleManifest,
     #[error("archive contains no base apk")]
     NoBaseApk,
     #[error("{0}")]
@@ -102,13 +104,13 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
     if kind.is_archive() {
         load_archive(path, size, kind)
     } else {
-        load_apk(path, size)
+        load_single(path, size, kind)
     }
 }
 
-fn load_apk(path: &Path, size: u64) -> Result<Loaded, LoadError> {
+fn load_single(path: &Path, size: u64, kind: ArchiveKind) -> Result<Loaded, LoadError> {
     let reader = ApkReader::open(path).map_err(|e| LoadError::Zip(e.to_string()))?;
-    finish(path, size, ArchiveKind::Apk, reader, None)
+    finish(path, size, kind, reader, None)
 }
 
 fn load_archive(path: &Path, size: u64, kind: ArchiveKind) -> Result<Loaded, LoadError> {
@@ -141,6 +143,7 @@ fn finish(
         {
             Default::default()
         }
+        None if kind == ArchiveKind::Aab => return Err(LoadError::NoBundleManifest),
         None => return Err(LoadError::NoManifest),
     };
     let mut native_libs = reader.native_libs();
@@ -259,8 +262,11 @@ fn icon_resources(all: BTreeMap<u32, ResourceInfo>) -> BTreeMap<u32, ResourceInf
                     | "anim"
                     | "animator"
                     | "interpolator"
-            ) || r.file_paths.iter().any(|p| p.starts_with("res/"))
-                || !r.references.is_empty()
+            ) || r.file_paths.iter().any(|p| {
+                p.starts_with("res/")
+                    || p.split_once('/')
+                        .is_some_and(|(_, path)| path.starts_with("res/"))
+            }) || !r.references.is_empty()
         })
         .collect()
 }

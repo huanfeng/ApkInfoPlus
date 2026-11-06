@@ -6,4 +6,4 @@ Exec=apkinfoplus %F
 Icon=apkinfoplus
 Terminal=false
 Categories=Development;Utility;
-MimeType=application/vnd.android.package-archive;application/x-xapk;application/x-apkm;application/x-apks;
+MimeType=application/vnd.android.package-archive;application/x-xapk;application/x-apkm;application/x-apks;application/x-aab;

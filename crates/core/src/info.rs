@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 
 use crate::model::ApkMeta;
 
-/// 文件容器类型。`Apk` 是单个安装包，其余是「装着若干 APK 的归档」。
+/// 文件容器类型。`Apk` 是单个安装包，AAB 是 App Bundle，其他类型是 APK 归档。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArchiveKind {
     Apk,
+    Aab,
     Xapk,
     Apkm,
     Apks,
@@ -25,7 +26,16 @@ impl ArchiveKind {
             .file_name()
             .map(|s| s.to_string_lossy().to_lowercase())
             .unwrap_or_default();
-        if name.ends_with(".xapk") {
+        let mut bundle_name = name.as_str();
+        while let Some((head, suffix)) = bundle_name.rsplit_once('.') {
+            if suffix.is_empty() || !suffix.bytes().all(|b| b.is_ascii_digit()) {
+                break;
+            }
+            bundle_name = head;
+        }
+        if bundle_name.ends_with(".aab") {
+            ArchiveKind::Aab
+        } else if name.ends_with(".xapk") {
             ArchiveKind::Xapk
         } else if name.ends_with(".apkm") {
             ArchiveKind::Apkm
@@ -39,13 +49,18 @@ impl ArchiveKind {
     }
 
     pub fn is_archive(self) -> bool {
-        !matches!(self, ArchiveKind::Apk)
+        !matches!(self, ArchiveKind::Apk | ArchiveKind::Aab)
+    }
+
+    pub fn is_installable(self) -> bool {
+        self != Self::Aab
     }
 
     /// 界面与文本信息里显示的名字。
     pub fn display_name(self) -> &'static str {
         match self {
             ArchiveKind::Apk => "APK",
+            ArchiveKind::Aab => "AAB",
             ArchiveKind::Xapk => "XAPK",
             ArchiveKind::Apkm => "APKM",
             ArchiveKind::Apks => "APKS",

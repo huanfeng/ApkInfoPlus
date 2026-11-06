@@ -91,6 +91,20 @@ impl Drop for TempDir {
 }
 
 pub fn run(req: InstallRequest, cancel: Arc<AtomicBool>, emit: impl Fn(InstallEvent)) {
+    if !req.kind.is_installable() || !ArchiveKind::from_path(&req.file).is_installable() {
+        for device in &req.devices {
+            emit(InstallEvent::Device {
+                device: device.clone(),
+                phase: InstallPhase::Failed,
+                message: "Android App Bundles cannot be installed directly".into(),
+            });
+        }
+        emit(InstallEvent::Finished {
+            success: 0,
+            failed: req.devices.len(),
+        });
+        return;
+    }
     let mut success = 0;
     let mut failed = 0;
 

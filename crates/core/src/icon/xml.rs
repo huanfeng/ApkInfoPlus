@@ -20,7 +20,8 @@ pub(crate) fn parse_root(bytes: &[u8]) -> Option<XmlElement> {
             }
         }
     }
-    parse_text(bytes)
+    // App Bundle 的 XML 与 APK 的 AXML 最终都交给同一个渲染器。
+    parse_text(bytes).or_else(|| crate::aab::xml_root(bytes))
 }
 
 /// 文本 XML → [`XmlElement`]。元素名与属性名都去掉命名空间前缀，

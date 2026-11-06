@@ -293,6 +293,7 @@ fn sdk_tip(ui_lang: Signal<String>, key: &'static str, api: i64) -> windui::i18n
 /// 右侧动作：纵向一列——安装（主操作）· 重命名 · 更多（重新解析 / 导出 / 路径 / 关闭都在菜单里）。
 fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
     let st = state.clone();
+    let installable = doc.current_info().is_some_and(|i| i.kind.is_installable());
     Element::col()
         .cross(Align::Stretch)
         .spacing(6)
@@ -301,6 +302,7 @@ fn action_block(state: &AppState, doc: Rc<Doc>) -> Element {
             Element::button(t!("action.install"))
                 .icon_content(icons::content("play", icons::ICON_WHITE))
                 .tooltip(t!("action.install_tooltip"))
+                .visible_when(move || installable)
                 .on_click({
                     let st = st.clone();
                     move |ctx| actions::open_install(&st, ctx)

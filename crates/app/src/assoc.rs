@@ -1,4 +1,4 @@
-//! 文件类型关联：把 .apk / .xapk / .apkm / .apks 的双击打开指向本程序。
+//! 文件类型关联：把 .apk / .xapk / .apkm / .apks / .aab 的双击打开指向本程序。
 //!
 //! - Windows：按当前用户写 `HKCU\Software\Classes`（不需要管理员），注册 ProgID、
 //!   `OpenWithProgids` 与 `Applications\apkinfoplus.exe`，并把扩展名默认值指过来。
@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 /// 关联的扩展名（不含点）。`.zip` 太宽泛，不抢。
-pub const EXTENSIONS: [&str; 4] = ["apk", "xapk", "apkm", "apks"];
+pub const EXTENSIONS: [&str; 5] = ["apk", "xapk", "apkm", "apks", "aab"];
 
 pub fn is_supported() -> bool {
     cfg!(any(target_os = "windows", target_os = "linux"))
@@ -253,12 +253,13 @@ mod imp {
 
     const DESKTOP: &str = "apkinfoplus.desktop";
     const MIME_XML: &str = "apkinfoplus.xml";
-    /// APK 有标准 MIME；其余三种没有，用自定义类型声明（按扩展名匹配）。
-    const MIMES: [(&str, &str); 4] = [
+    /// APK 有标准 MIME；其余格式没有，用自定义类型声明（按扩展名匹配）。
+    const MIMES: [(&str, &str); 5] = [
         ("apk", "application/vnd.android.package-archive"),
         ("xapk", "application/x-xapk"),
         ("apkm", "application/x-apkm"),
         ("apks", "application/x-apks"),
+        ("aab", "application/x-aab"),
     ];
 
     fn data_home() -> Option<PathBuf> {

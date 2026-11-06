@@ -42,6 +42,7 @@ fn current_ext(doc: &Doc) -> String {
         Some(apkinfo_core::info::ArchiveKind::Xapk) => ".xapk",
         Some(apkinfo_core::info::ArchiveKind::Apkm) => ".apkm",
         Some(apkinfo_core::info::ArchiveKind::Apks) => ".apks",
+        Some(apkinfo_core::info::ArchiveKind::Aab) => ".aab",
         _ => ".apk",
     }
     .to_string()
@@ -106,10 +107,11 @@ pub fn open(state: &AppState, doc: &Doc) {
 }
 
 /// 能显示在对话框里的错误（译文 key）。
-const ERROR_KEYS: [&str; 5] = [
+const ERROR_KEYS: [&str; 6] = [
     "rename.name_cannot_be_empty",
     "rename.invalid_chars",
     "rename.must_end_with_apk",
+    "rename.aab_extension",
     "rename.exists",
     "rename.failed",
 ];
@@ -126,7 +128,7 @@ pub fn validate(name: &str, dir: &Path, old: &Path) -> Result<PathBuf, &'static 
         return Err("rename.invalid_chars");
     }
     let lower = trimmed.to_lowercase();
-    if ![".apk", ".xapk", ".apkm", ".apks"]
+    if ![".apk", ".xapk", ".apkm", ".apks", ".aab"]
         .iter()
         .any(|e| lower.ends_with(e))
     {
@@ -142,6 +144,11 @@ pub fn validate(name: &str, dir: &Path, old: &Path) -> Result<PathBuf, &'static 
         return Err("rename.invalid_chars");
     }
     let dest = dir.join(trimmed);
+    // 保持 AAB 扩展名，避免改名后被当作可安装的 APK。
+    use apkinfo_core::info::ArchiveKind;
+    if (ArchiveKind::from_path(old) == ArchiveKind::Aab) != lower.ends_with(".aab") {
+        return Err("rename.aab_extension");
+    }
     // 只改大小写时在不区分大小写的文件系统上 `exists()` 为真，但那正是用户想要的改名
     let same_ignoring_case = dest.file_name().zip(old.file_name()).is_some_and(|(a, b)| {
         a.to_string_lossy()
@@ -302,5 +309,12 @@ mod tests {
         assert!(validate("ok.XAPK", &dir, &old).is_ok());
         assert!(validate("CON.apk", &dir, &old).is_err());
         assert!(validate("lpt1.xapk", &dir, &old).is_err());
+        assert_eq!(validate("new.aab", &dir, &old), Err("rename.aab_extension"));
+        let bundle = dir.join("old.AAB.1");
+        assert!(validate("new.aab", &dir, &bundle).is_ok());
+        assert_eq!(
+            validate("new.apk", &dir, &bundle),
+            Err("rename.aab_extension")
+        );
     }
 }
