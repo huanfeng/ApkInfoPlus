@@ -829,6 +829,37 @@ pub(crate) enum Layer {
         mime: &'static str,
         bytes: Vec<u8>,
     },
+    /// `<inset>`：四边内缩（相对图层尺寸的比例，左 / 上 / 右 / 下）后绘制内层。
+    Inset {
+        inner: Box<Layer>,
+        insets: [f32; 4],
+    },
+}
+
+impl Layer {
+    /// 最内层（剥掉 inset 包装）。
+    fn leaf(&self) -> &Layer {
+        match self {
+            Layer::Inset { inner, .. } => inner.leaf(),
+            other => other,
+        }
+    }
+
+    /// 最内层的 vector（视口尺寸以它为准）。
+    pub(crate) fn vector(&self) -> Option<&Rc<XmlElement>> {
+        match self.leaf() {
+            Layer::Vector(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// 最内层的位图字节。
+    pub(crate) fn bitmap(&self) -> Option<&[u8]> {
+        match self.leaf() {
+            Layer::Bitmap { bytes, .. } => Some(bytes),
+            _ => None,
+        }
+    }
 }
 
 /// adaptive-icon 导出数据（对应 Dart `AdaptiveIconSvgData`）。
@@ -856,10 +887,7 @@ pub(crate) fn adaptive_document(
     }
     let ref_vec = [&data.foreground, &data.background]
         .into_iter()
-        .find_map(|l| match l {
-            Some(Layer::Vector(v)) => Some(v.clone()),
-            _ => None,
-        });
+        .find_map(|l| l.as_ref()?.vector().cloned());
     let (vw, vh) = match &ref_vec {
         Some(v) => {
             let vw = parse_dimension(attr(v, "viewportWidth"), 0.0);
@@ -918,9 +946,10 @@ fn emit_layer(
     vec_scale: f32,
     bmp_scale: f32,
 ) {
+    // 与渲染（`adaptive_fg_scale`）一致：只有直接是 vector 的前景用 vector 系数，inset 等包装按位图系数。
     let scale = match layer {
         Layer::Vector(_) => vec_scale,
-        Layer::Bitmap { .. } => bmp_scale,
+        Layer::Bitmap { .. } | Layer::Inset { .. } => bmp_scale,
     };
     let scaled = (scale - 1.0).abs() > 1e-6;
     if scaled {
@@ -962,10 +991,33 @@ fn emit_layer(
             );
             b.painted += 1;
         }
+        Layer::Inset { inner, insets } => {
+            let [l, t, r, bt] = *insets;
+            let (sx, sy) = ((1.0 - l - r).max(0.0), (1.0 - t - bt).max(0.0));
+            let _ = writeln!(
+                body,
+                "<g transform=\"translate({} {}) scale({} {})\">",
+                f(l * vw),
+                f(t * vh),
+                f(sx),
+                f(sy)
+            );
+            emit_layer(b, body, inner, vw, vh, 1.0, 1.0);
+            body.push_str("</g>\n");
+        }
     }
     if scaled {
         body.push_str("</g>\n");
     }
+}
+
+/// 非 adaptive 的单层（如 `<inset>` 包着 vector）→ 完整 SVG；视口取内层 vector，没有 vector 时不导出。
+pub(crate) fn layer_document(res: &mut dyn PaintResolver, layer: &Layer) -> Option<String> {
+    let (vw, vh) = vector_viewport(layer.vector()?);
+    let mut b = SvgBuilder::new(res);
+    let mut body = String::new();
+    emit_layer(&mut b, &mut body, layer, vw, vh, 1.0, 1.0);
+    Some(b.document(vw, vh, &body))
 }
 
 /// 标准 base64（只在导出内嵌位图时用，不值得为此引入依赖）。

@@ -106,7 +106,49 @@ impl<'a> IconRenderer<'a> {
     pub fn raw_bytes(&mut self, c: &IconCandidate) -> Option<Vec<u8>> {
         self.res.read_file(&c.path)
     }
+
+    /// 填写候选的导出能力与尺寸信息（见 [`IconCandidate`] 的对应字段），并把尺寸写进标签。
+    pub fn annotate(&mut self, c: &mut IconCandidate) {
+        let bytes = self.res.read_file(&c.path);
+        c.file_size = bytes.as_ref().map(|b| b.len() as u64);
+        if c.kind == IconKind::Bitmap {
+            c.pixel_size = bytes.as_deref().and_then(bitmap_dimensions);
+        } else {
+            c.svg_exportable = export::has_vector(&mut self.res, &c.path);
+            c.native_size = export::bitmap_native_size(&mut self.res, &c.path);
+        }
+        c.append_details();
+    }
 }
+
+/// 只读文件头取位图尺寸，不解码像素。
+pub(crate) fn bitmap_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
+}
+
+/// 导出 PNG：源文件本身就是 PNG 的位图候选直接返回原字节（无损且不变大），
+/// 其余渲染后编码；由位图组成的 XML 候选按 `native_size` 渲染，其余用 `default_size`。
+pub fn export_png_bytes(
+    c: &IconCandidate,
+    raw: Option<Vec<u8>>,
+    default_size: u32,
+    render: impl FnOnce(u32) -> Option<RgbaImage>,
+) -> Option<Vec<u8>> {
+    if c.kind == IconKind::Bitmap {
+        if let Some(bytes) = raw.filter(|b| b.starts_with(PNG_MAGIC)) {
+            return Some(bytes);
+        }
+    }
+    let img = render(c.native_size.unwrap_or(default_size))?;
+    let png = encode_png(&img);
+    (!png.is_empty()).then_some(png)
+}
+
+const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 /// 解码 PNG / WebP / JPEG 为 RGBA（XAPK 的 `icon.png` 等直接用）。
 pub fn decode_bitmap(bytes: &[u8]) -> Option<RgbaImage> {
@@ -148,12 +190,22 @@ pub fn encode_png(img: &RgbaImage) -> Vec<u8> {
         );
         return Vec::new();
     };
-    let mut out = std::io::Cursor::new(Vec::new());
-    if let Err(e) = buf.write_to(&mut out, image::ImageFormat::Png) {
+    // 最高压缩 + 自适应滤波：导出文件不至于比 APK 里的原图大出几倍（默认档位偏向速度）。
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::ImageEncoder as _;
+    let mut out = Vec::new();
+    let encoder =
+        PngEncoder::new_with_quality(&mut out, CompressionType::Best, FilterType::Adaptive);
+    if let Err(e) = encoder.write_image(
+        buf.as_raw(),
+        img.width,
+        img.height,
+        image::ExtendedColorType::Rgba8,
+    ) {
         log::warn!("icon: encode_png failed: {e}");
         return Vec::new();
     }
-    out.into_inner()
+    out
 }
 
 #[cfg(test)]

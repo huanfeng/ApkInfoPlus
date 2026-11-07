@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use apkinfo_core::icon::{encode_png, IconCandidate, IconKind, RgbaImage};
+use apkinfo_core::icon::{encode_png, IconCandidate, RgbaImage};
 use apkinfo_core::info::ArchiveKind;
 use windui::core::EventCtx;
 use windui::event::MenuItem;
@@ -367,10 +367,7 @@ pub fn icon_menu_items(state: &AppState, doc: &Rc<Doc>) -> Vec<MenuItem> {
         items.push(MenuItem::separator());
     }
     let has_icon = doc.icon.with(|v| !v.is_empty());
-    let is_vector = candidates
-        .get(current)
-        .map(|c| c.kind == IconKind::XmlVector)
-        .unwrap_or(false);
+    let is_vector = candidates.get(current).is_some_and(|c| c.svg_exportable);
     {
         let st = state.clone();
         let d = doc.clone();
@@ -456,16 +453,13 @@ pub fn export_png(state: &AppState, doc: &Rc<Doc>, ctx: &mut EventCtx) {
         let Some(dest) = dest else { return };
         let fallback = fallback.map(|f| (*f).clone());
         thread::spawn(move || {
-            let image = match session.lock() {
-                Ok(mut s) => s.render(&candidate, EXPORT_ICON_SIZE, true).ok(),
-                Err(p) => p
-                    .into_inner()
-                    .render(&candidate, EXPORT_ICON_SIZE, true)
-                    .ok(),
+            let png = match session.lock() {
+                Ok(mut s) => s.export_png(&candidate, EXPORT_ICON_SIZE).ok(),
+                Err(p) => p.into_inner().export_png(&candidate, EXPORT_ICON_SIZE).ok(),
             }
-            .or(fallback);
-            let result = match image {
-                Some(img) => std::fs::write(&dest, encode_png(&img))
+            .or_else(|| fallback.map(|f| encode_png(&f)));
+            let result = match png {
+                Some(bytes) => std::fs::write(&dest, bytes)
                     .map(|_| dest)
                     .map_err(|e| e.to_string()),
                 None => Err(tr!("icon.render_failed")),
@@ -479,7 +473,7 @@ pub fn export_svg(state: &AppState, doc: &Rc<Doc>, ctx: &mut EventCtx) {
     let (Some(candidate), Some(session)) = (current_candidate(doc), session_of(doc)) else {
         return;
     };
-    if candidate.kind != IconKind::XmlVector {
+    if !candidate.svg_exportable {
         ctx.toast_err(tr!("icon.svg_only_vector"));
         return;
     }
@@ -594,9 +588,7 @@ pub fn more_menu_items(state: &AppState, doc: &Rc<Doc>) -> Vec<MenuItem> {
         items.push(MenuItem::separator());
     }
     let has_icon = doc.icon.with(|v| !v.is_empty());
-    let is_vector = current_candidate(doc)
-        .map(|c| c.kind == IconKind::XmlVector)
-        .unwrap_or(false);
+    let is_vector = current_candidate(doc).is_some_and(|c| c.svg_exportable);
     {
         let st = state.clone();
         let d = doc.clone();

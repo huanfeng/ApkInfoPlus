@@ -30,8 +30,18 @@ pub struct IconCandidate {
     pub kind: IconKind,
     pub dpi: Option<u32>,
     pub dpi_label: Option<String>,
-    /// UI 展示用，如 `XML ic_launcher (anydpi-v26)`、`PNG ic_launcher (xxxhdpi)`。
+    /// UI 展示用，如 `XML ic_launcher (anydpi-v26)`、`PNG ic_launcher (xxxhdpi) · 192×192 · 12.3 KB`。
     pub display_label: String,
+    /// 以下由 [`IconRenderer::annotate`](super::IconRenderer::annotate) 在加载时填写。
+    /// 能导出为含矢量的 SVG（纯位图内容即使包在 XML 里也不算）。
+    pub svg_exportable: bool,
+    /// 位图候选的像素尺寸。
+    pub pixel_size: Option<(u32, u32)>,
+    /// 由位图组成的 XML 候选（adaptive-icon / inset 包位图）各层最大边长：
+    /// 导出 PNG 按它渲染，不放大到固定尺寸。
+    pub native_size: Option<u32>,
+    /// 候选文件本身的字节数。
+    pub file_size: Option<u64>,
 }
 
 fn dpi_label_to_value(label: &str) -> Option<u32> {
@@ -93,6 +103,21 @@ impl IconCandidate {
             dpi,
             dpi_label,
             display_label,
+            svg_exportable: false,
+            pixel_size: None,
+            native_size: None,
+            file_size: None,
+        }
+    }
+
+    /// 在标签后追加分辨率与文件大小，便于在多个候选里挑最优。
+    pub(crate) fn append_details(&mut self) {
+        if let Some((w, h)) = self.pixel_size {
+            self.display_label.push_str(&format!(" · {w}×{h}"));
+        }
+        if let Some(size) = self.file_size {
+            self.display_label
+                .push_str(&format!(" · {}", crate::info::format_file_size(size)));
         }
     }
 }

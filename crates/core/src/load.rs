@@ -83,6 +83,13 @@ impl IconSession {
         self.read(&c.path)
     }
 
+    /// 导出 PNG 的文件内容，规则见 [`icon::export_png_bytes`]。
+    pub fn export_png(&mut self, c: &IconCandidate, default_size: u32) -> Result<Vec<u8>, String> {
+        let raw = self.raw_bytes(c);
+        icon::export_png_bytes(c, raw, default_size, |size| self.render(c, size, true).ok())
+            .ok_or_else(|| format!("icon cannot be rendered: {}", c.path))
+    }
+
     pub fn resources(&self) -> &BTreeMap<u32, ResourceInfo> {
         &self.resources
     }
@@ -220,16 +227,17 @@ fn finish(
     };
     if session.archive_icon.is_some() {
         // 归档包自带的图标优先展示：它是发布者挑好的最终样子。
-        candidates.insert(
-            0,
-            IconCandidate {
-                path: ARCHIVE_ICON_PATH.to_string(),
-                kind: IconKind::Bitmap,
-                dpi: None,
-                dpi_label: None,
-                display_label: format!("PNG icon ({})", kind.display_name()),
-            },
-        );
+        let mut c = IconCandidate::from_path(ARCHIVE_ICON_PATH, None);
+        c.kind = IconKind::Bitmap;
+        c.display_label = format!("PNG icon ({})", kind.display_name());
+        candidates.insert(0, c);
+    }
+    {
+        let (resources, me) = session.renderer();
+        let mut renderer = IconRenderer::new(me, &resources);
+        for c in &mut candidates {
+            renderer.annotate(c);
+        }
     }
     Ok(Loaded {
         info,

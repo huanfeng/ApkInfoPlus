@@ -319,6 +319,148 @@ fn export_adaptive_svg() {
     assert!(matches!(r.export_svg(&b), Err(IconError::Unsupported(_))));
 }
 
+/// issue #2 的样例：前景是 `<inset>` 包着一张 PNG，背景可以是 vector 或纯色。
+fn inset_apk(vector_background: bool) -> (MemSource, BTreeMap<u32, ResourceInfo>) {
+    let background = if vector_background {
+        r#"<background android:drawable="@drawable/bg"/>"#
+    } else {
+        r##"<background android:drawable="#ff102030"/>"##
+    };
+    let adaptive = format!(
+        r#"<adaptive-icon {NS}>{background}<foreground android:drawable="@drawable/fg"/></adaptive-icon>"#
+    );
+    let fg = format!(
+        r#"<inset {NS} android:drawable="@drawable/art" android:insetLeft="16.6667%" android:insetRight="16.6667%" android:insetTop="16.6667%" android:insetBottom="16.6667%"/>"#
+    );
+    let bg = format!(
+        r##"<vector {NS} android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108"><path android:pathData="M0,0h108v108h-108z" android:fillColor="#ff00ff00"/></vector>"##
+    );
+    let inset_vector =
+        format!(r#"<inset {NS} android:drawable="@drawable/bg" android:inset="10.8dp"/>"#);
+    let mut png = Vec::new();
+    image::RgbaImage::from_pixel(300, 200, image::Rgba([255, 0, 0, 255]))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("png");
+    let src = MemSource::with(&[
+        ("res/mipmap-anydpi-v26/ic_launcher.xml", adaptive.as_bytes()),
+        ("res/drawable/fg.xml", fg.as_bytes()),
+        ("res/drawable/bg.xml", bg.as_bytes()),
+        ("res/drawable/inset_vector.xml", inset_vector.as_bytes()),
+        ("res/drawable-nodpi/art.png", &png),
+    ]);
+    let mut map = BTreeMap::new();
+    for (id, key, path) in [
+        (0x7f080001, "fg", "res/drawable/fg.xml"),
+        (0x7f080002, "bg", "res/drawable/bg.xml"),
+        (0x7f080003, "art", "res/drawable-nodpi/art.png"),
+    ] {
+        map.insert(id, res(id, "drawable", key, &[path], &[], &[]));
+    }
+    (src, map)
+}
+
+#[test]
+fn export_svg_keeps_inset_bitmap_foreground() {
+    let (mut src, map) = inset_apk(true);
+    let mut r = IconRenderer::new(&mut src, &map);
+    let mut c = IconCandidate::from_path("res/mipmap-anydpi-v26/ic_launcher.xml", None);
+    r.annotate(&mut c);
+    assert!(c.svg_exportable);
+    assert_eq!(c.native_size, None, "含 vector 时按固定尺寸导出");
+    let svg_text = r.export_svg(&c).expect("svg");
+    assert!(svg_text.contains("<image "), "前景位图丢失：{svg_text}");
+    // inset 16.6667% → 平移 18、缩放约 2/3；外层按位图前景系数 1.6 放大
+    assert!(svg_text.contains("scale(1.6)"), "{svg_text}");
+    assert!(
+        svg_text.contains("translate(18 18) scale(0.66"),
+        "{svg_text}"
+    );
+    assert!(svg_text.contains(r##"fill="#00ff00""##), "{svg_text}");
+    assert_svg_renders(&svg_text);
+}
+
+#[test]
+fn pure_bitmap_adaptive_is_not_svg_and_exports_at_native_size() {
+    let (mut src, map) = inset_apk(false);
+    let mut r = IconRenderer::new(&mut src, &map);
+    let mut c = IconCandidate::from_path("res/mipmap-anydpi-v26/ic_launcher.xml", None);
+    r.annotate(&mut c);
+    assert!(!c.svg_exportable);
+    assert!(matches!(r.export_svg(&c), Err(IconError::Unsupported(_))));
+    assert_eq!(c.native_size, Some(300));
+    let mut rendered_at = None;
+    let png = export_png_bytes(&c, None, 1024, |size| {
+        rendered_at = Some(size);
+        r.render_candidate(&c, size, true).ok()
+    })
+    .expect("png");
+    assert_eq!(rendered_at, Some(300));
+    let img = decode_bitmap(&png).expect("decode");
+    assert_eq!((img.width, img.height), (300, 300));
+}
+
+#[test]
+fn export_svg_unwraps_standalone_inset_vector() {
+    let (mut src, map) = inset_apk(true);
+    let mut r = IconRenderer::new(&mut src, &map);
+    let mut c = IconCandidate::from_path("res/drawable/inset_vector.xml", None);
+    r.annotate(&mut c);
+    assert!(c.svg_exportable);
+    let svg_text = r.export_svg(&c).expect("svg");
+    // 10.8dp / 108dp = 10%：平移 10.8，缩放 0.8
+    assert!(
+        svg_text.contains("translate(10.8 10.8) scale(0.8 0.8)"),
+        "{svg_text}"
+    );
+    assert_svg_renders(&svg_text);
+}
+
+#[test]
+fn png_export_writes_original_png_bytes() {
+    let (mut src, map) = inset_apk(true);
+    let mut r = IconRenderer::new(&mut src, &map);
+    let mut c = IconCandidate::from_path("res/drawable-nodpi/art.png", None);
+    r.annotate(&mut c);
+    let raw = r.raw_bytes(&c);
+    let png = export_png_bytes(&c, raw.clone(), 1024, |_| panic!("PNG 源不应重新渲染"));
+    assert_eq!(png, raw);
+    // 不是 PNG 的位图（WebP / JPEG）才需要渲染后重新编码
+    let fake_webp = b"RIFF\0\0\0\0WEBPVP8 ".to_vec();
+    let mut size = None;
+    let out = export_png_bytes(&c, Some(fake_webp), 1024, |s| {
+        size = Some(s);
+        Some(RgbaImage {
+            width: 1,
+            height: 1,
+            data: vec![0; 4],
+        })
+    });
+    assert_eq!(size, Some(1024));
+    assert!(out.is_some_and(|b| b.starts_with(b"\x89PNG")));
+}
+
+#[test]
+fn annotate_appends_resolution_and_file_size() {
+    let (mut src, map) = inset_apk(true);
+    let mut r = IconRenderer::new(&mut src, &map);
+    let mut c = IconCandidate::from_path("res/drawable-nodpi/art.png", None);
+    r.annotate(&mut c);
+    assert_eq!(c.pixel_size, Some((300, 200)));
+    let size = crate::info::format_file_size(c.file_size.expect("size"));
+    assert_eq!(
+        c.display_label,
+        format!("PNG art (nodpi) · 300×200 · {size}")
+    );
+    let mut x = IconCandidate::from_path("res/drawable/fg.xml", None);
+    r.annotate(&mut x);
+    assert_eq!(x.pixel_size, None);
+    assert!(
+        x.display_label.starts_with("XML fg (?) · "),
+        "{}",
+        x.display_label
+    );
+}
+
 #[test]
 fn nothing_drawn_is_error() {
     let (mut src, map) = memory_apk();
@@ -389,9 +531,16 @@ fn real_apk_icons() {
             resources.len()
         );
         let mut src = ReaderSource(&reader);
-        let candidates = collect_candidates(&mut src, &resources, None, &meta.icon_paths);
+        let mut candidates = collect_candidates(&mut src, &resources, None, &meta.icon_paths);
         let mut r = IconRenderer::new(&mut src, &resources);
+        for c in &mut candidates {
+            r.annotate(c);
+        }
         for (i, c) in candidates.iter().enumerate() {
+            println!(
+                "  [{i}] svg={} native={:?}",
+                c.svg_exportable, c.native_size
+            );
             match r.render_candidate(c, DEFAULT_ICON_SIZE, false) {
                 Ok(img) => {
                     let file = out.join(format!("{stem}_{i}.png"));
