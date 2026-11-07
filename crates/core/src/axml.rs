@@ -248,7 +248,7 @@ const FRAMEWORK_ATTR_NAMES: &[(u32, &str)] = &[
     (0x0101066c, "enableOnBackInvokedCallback"),
 ];
 
-fn framework_attr_name(res_id: u32) -> Option<&'static str> {
+pub(crate) fn framework_attr_name(res_id: u32) -> Option<&'static str> {
     FRAMEWORK_ATTR_NAMES
         .iter()
         .find(|(id, _)| *id == res_id)
@@ -679,7 +679,12 @@ fn format_value(
         RES_TYPE_STRING => safe_get(strings, raw_index).to_string(),
         RES_TYPE_FLOAT => dart_double(f32::from_bits(u) as f64),
         RES_TYPE_DIMENSION => format_dimension(u),
-        RES_TYPE_FRACTION => format!("{}{}", dart_double(complex_value(u)), fraction_unit(u)),
+        // 分数以 0..1 存储，源码写法是百分比（`16.6667%` / `50%p`）。
+        RES_TYPE_FRACTION => format!(
+            "{}{}",
+            dart_double(complex_value(u) * 100.0),
+            fraction_unit(u)
+        ),
         RES_TYPE_DYNAMIC_REFERENCE => format!("@dyn/0x{:x}", data as u32),
         RES_TYPE_INT_DEC => data.to_string(),
         RES_TYPE_INT_HEX => format!("0x{u:x}"),
@@ -716,9 +721,12 @@ pub(crate) fn dart_double(v: f64) -> String {
 }
 
 /// complex 值：尾数 × 基数倍率。与 Dart 版一致按无符号尾数计算。
+/// Android `TypedValue.complexToFloat`：高 24 位是有符号尾数（低 8 位为 0，故先乘 1/256），
+/// radix 决定小数位。Dart 版漏了 1/256，结果大 256 倍（16dp 显示成 4096dp）。
 fn complex_value(data: u32) -> f64 {
-    let mantissa = (data & 0xffff_ff00) as f64;
-    mantissa * RADIX_MULTS[((data >> 4) & 0x3) as usize]
+    const MANTISSA_MULT: f64 = 1.0 / (1 << 8) as f64;
+    let mantissa = (data & 0xffff_ff00) as i32 as f64;
+    mantissa * MANTISSA_MULT * RADIX_MULTS[((data >> 4) & 0x3) as usize]
 }
 
 pub(crate) fn format_dimension(value: u32) -> String {
@@ -744,8 +752,8 @@ fn dimension_unit(data: u32) -> &'static str {
 /// 注意：Dart 版输出的就是字面 `%%`（源自 Java printf 写法的遗留），保持一致。
 fn fraction_unit(data: u32) -> &'static str {
     match data & 0xf {
-        0 => "%%",
-        1 => "%%p",
+        0 => "%",
+        1 => "%p",
         _ => "(unknown unit)",
     }
 }
@@ -1089,12 +1097,25 @@ pub(crate) mod tests {
         // 16dp：尾数 16<<8，radix 0，unit 1
         assert_eq!(
             format_value(RES_TYPE_DIMENSION, (16 << 8) | 1, -1, &s, 0),
-            "4096.0dp"
+            "16.0dp"
         );
+        // -2.5dp：radix 1（23p0 之后的 16p7），尾数为负
         assert_eq!(
-            format_value(RES_TYPE_FRACTION, 0x100 | 1, -1, &s, 0),
-            "256.0%%p"
+            format_value(RES_TYPE_DIMENSION, (-320i32 << 8) | (1 << 4) | 1, -1, &s, 0),
+            "-2.5dp"
         );
+        // 50%p：0.5 = 尾数 0x400000 × 2^-23（radix 3），unit 1
+        assert_eq!(
+            format_value(
+                RES_TYPE_FRACTION,
+                (0x40_0000 << 8) | (3 << 4) | 1,
+                -1,
+                &s,
+                0
+            ),
+            "50.0%p"
+        );
+        assert_eq!(format_value(RES_TYPE_FRACTION, 0x100, -1, &s, 0), "100.0%");
         assert_eq!(format_value(0x42, 0x10, -1, &s, 0), "0x10");
         assert_eq!(format_value(RES_TYPE_NULL, 0, -1, &s, 0), "<undefined>");
         assert_eq!(format_value(RES_TYPE_NULL, 1, -1, &s, 0), "<empty>");

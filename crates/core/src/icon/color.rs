@@ -158,8 +158,12 @@ fn leading_number(s: &str) -> Option<&str> {
 }
 
 /// 尺寸是否为百分比（Android inset 自 API 28 起支持 fraction）。
+/// 百分比写法：`16.6667%`，或相对父容器的 `50%p`（图标场景里两者同样按自身尺寸换算）。
 pub(crate) fn is_fraction(raw: Option<&str>) -> bool {
-    raw.is_some_and(|s| s.trim().ends_with('%'))
+    raw.is_some_and(|s| {
+        let s = s.trim();
+        s.ends_with('%') || s.ends_with("%p")
+    })
 }
 
 #[cfg(test)]
