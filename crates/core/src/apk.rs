@@ -195,6 +195,21 @@ impl ApkReader {
             .unwrap_or_default()
     }
 
+    /// [`resources_with`](Self::resources_with) 后紧接 [`release_resource_table`](Self::release_resource_table)。
+    /// App Bundle 的索引直接移交而不复制（其中本就只有路径 / 引用 / 颜色，没有字符串值可过滤）。
+    pub fn take_resources_with(
+        &mut self,
+        keep: impl Fn(&str, &str) -> bool,
+    ) -> BTreeMap<u32, ResourceInfo> {
+        let resources = if self.is_bundle {
+            std::mem::take(&mut self.bundle_resources)
+        } else {
+            self.resources_with(keep)
+        };
+        self.release_resource_table();
+        resources
+    }
+
     /// 读取条目内容；不存在或解压失败返回 `None`。
     pub fn read_file(&self, name: &str) -> Option<Vec<u8>> {
         let mut archive = self.archive.lock().unwrap_or_else(|e| e.into_inner());

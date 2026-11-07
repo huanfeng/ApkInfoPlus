@@ -603,6 +603,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn archive_kind_detects_bundles_with_numeric_suffix() {
+        let kind = |name: &str| ArchiveKind::from_path(Path::new(name));
+        assert_eq!(kind("app.aab"), ArchiveKind::Aab);
+        assert_eq!(kind("APP.AAB"), ArchiveKind::Aab);
+        // 下载工具常见的重名后缀
+        assert_eq!(kind("app.aab.1"), ArchiveKind::Aab);
+        assert_eq!(kind("app.aab.2.10"), ArchiveKind::Aab);
+        assert_eq!(kind("app.aab.bak"), ArchiveKind::Apk);
+        assert_eq!(kind("aab"), ArchiveKind::Apk);
+        assert_eq!(kind("app.apks"), ArchiveKind::Apks);
+        assert_eq!(kind("app.apk"), ArchiveKind::Apk);
+    }
+
+    #[test]
     fn native_libs_are_filtered_and_sorted() {
         let entries = [
             ("lib/x86/libb.so", 2),

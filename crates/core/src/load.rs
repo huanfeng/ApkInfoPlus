@@ -150,8 +150,7 @@ fn finish(
     let dex = reader.dex_info();
     // 只留图标解析用得着的条目：drawable / mipmap / color 这几类，以及值里带 res/ 路径或引用的。
     // Chrome 这种带几十种语言的包，全量资源表（每条翻译都是一个 String）要占几十 MB。
-    let resources = Arc::new(icon_resources(reader.resources_with(icon_string)));
-    reader.release_resource_table();
+    let resources = Arc::new(icon_resources(reader.take_resources_with(icon_string)));
 
     // 主图标：资源表里 density 最高的那条；没有资源表时退回原始引用值。
     let main_icon_path = meta
