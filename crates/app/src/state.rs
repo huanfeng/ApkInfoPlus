@@ -415,11 +415,6 @@ impl AppState {
         self.refresh_entries();
     }
 
-    /// 当前文档的解析结果（没有文档或尚未解析完为 `None`）。
-    pub fn current_info(&self) -> Option<Rc<ApkInfo>> {
-        self.active_doc().and_then(|d| d.current_info())
-    }
-
     // ---- 配置 ----
 
     /// 读配置的便捷方法。

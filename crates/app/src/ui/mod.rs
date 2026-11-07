@@ -332,7 +332,7 @@ pub fn page(body: Element) -> Element {
         )
 }
 
-/// 等宽、可选中复制的多行文本块（哈希、文本信息、签名指纹）。
+/// 只读、可选中复制的多行文本块（哈希、文本信息、签名指纹）；需要等宽时由调用方加 `mono_family()`。
 pub fn readonly_text_block(text: Signal<String>, min_height: i32) -> Element {
     Element::text_input(text, "")
         .multiline()

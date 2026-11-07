@@ -713,9 +713,7 @@ pub fn recent_menu_items(state: &AppState) -> Vec<MenuItem> {
 // ---------------------------------------------------------------------------
 
 pub fn open_install(state: &AppState, ctx: &mut EventCtx) {
-    if state.current_info().is_none() {
-        return;
-    }
+    // 当前文档是否可安装由 `install::open` 判断：安装进行中时无论当前文档如何都要能拉回窗口。
     crate::ui::install::open(state, ctx);
 }
 

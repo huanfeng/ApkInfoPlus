@@ -11,8 +11,8 @@ use apkinfo_core::info::{
 use windui::prelude::*;
 
 use super::{
-    copy_button, field_row, field_row_copy, field_row_custom, join_lines, readonly_text_block, page,
-    section, section_with_action, selectable_signal,
+    copy_button, field_row, field_row_copy, field_row_custom, join_lines, page,
+    readonly_text_block, section, section_with_action, selectable_signal,
 };
 use crate::android_text;
 use crate::state::{AppState, Doc, HashState, SigState};

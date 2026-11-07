@@ -186,21 +186,19 @@ impl InstallState {
 /// 打开安装窗口：列出已解析的安装包（默认只选中当前文档）、刷新设备。
 /// 窗口已开着时只把它拉到前台（`single` 去重）。
 pub fn open(state: &AppState, ctx: &mut EventCtx) {
-    let Some(active) = state.active_doc() else {
-        return;
-    };
-    if !active
-        .current_info()
-        .is_some_and(|info| info.kind.is_installable())
-    {
-        return;
-    }
     let ins = &state.install;
     // 安装进行中只把窗口重新拉到前台，不能重置设备状态与日志。
+    // 放在当前文档检查之前：切到 AAB、解析中或已全部关闭的标签页时也要能拉回。
     if ins.installing.get() {
         ctx.open_window(window(state));
         return;
     }
+    let Some(active) = state.active_doc().filter(|doc| {
+        doc.current_info()
+            .is_some_and(|info| info.kind.is_installable())
+    }) else {
+        return;
+    };
     // 先把旧行清掉再回收旧信号：host_signal 下一帧按新数据重建，不会再读到已回收的句柄。
     ins.files.set(Vec::new());
     let mut scope = ins.file_scope.borrow_mut();

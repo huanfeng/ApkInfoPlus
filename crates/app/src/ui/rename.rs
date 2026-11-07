@@ -107,11 +107,12 @@ pub fn open(state: &AppState, doc: &Doc) {
 }
 
 /// 能显示在对话框里的错误（译文 key）。
-const ERROR_KEYS: [&str; 6] = [
+const ERROR_KEYS: [&str; 7] = [
     "rename.name_cannot_be_empty",
     "rename.invalid_chars",
     "rename.must_end_with_apk",
     "rename.aab_extension",
+    "rename.not_aab",
     "rename.exists",
     "rename.failed",
 ];
@@ -146,8 +147,13 @@ pub fn validate(name: &str, dir: &Path, old: &Path) -> Result<PathBuf, &'static 
     let dest = dir.join(trimmed);
     // 保持 AAB 扩展名，避免改名后被当作可安装的 APK。
     use apkinfo_core::info::ArchiveKind;
-    if (ArchiveKind::from_path(old) == ArchiveKind::Aab) != lower.ends_with(".aab") {
-        return Err("rename.aab_extension");
+    match (
+        ArchiveKind::from_path(old) == ArchiveKind::Aab,
+        lower.ends_with(".aab"),
+    ) {
+        (true, false) => return Err("rename.aab_extension"),
+        (false, true) => return Err("rename.not_aab"),
+        _ => {}
     }
     // 只改大小写时在不区分大小写的文件系统上 `exists()` 为真，但那正是用户想要的改名
     let same_ignoring_case = dest.file_name().zip(old.file_name()).is_some_and(|(a, b)| {
@@ -309,7 +315,7 @@ mod tests {
         assert!(validate("ok.XAPK", &dir, &old).is_ok());
         assert!(validate("CON.apk", &dir, &old).is_err());
         assert!(validate("lpt1.xapk", &dir, &old).is_err());
-        assert_eq!(validate("new.aab", &dir, &old), Err("rename.aab_extension"));
+        assert_eq!(validate("new.aab", &dir, &old), Err("rename.not_aab"));
         let bundle = dir.join("old.AAB.1");
         assert!(validate("new.aab", &dir, &bundle).is_ok());
         assert_eq!(
