@@ -8,6 +8,7 @@
 mod candidates;
 mod color;
 mod export;
+mod original;
 mod path;
 mod render;
 mod resolve;
@@ -19,6 +20,7 @@ use std::collections::BTreeMap;
 use crate::model::ResourceInfo;
 
 pub use candidates::{collect_candidates, IconCandidate, IconKind};
+pub use original::{zip_files, OriginalFile};
 
 /// 图标文件访问。
 pub trait IconSource {
@@ -116,8 +118,25 @@ impl<'a> IconRenderer<'a> {
         } else {
             c.svg_exportable = export::has_vector(&mut self.res, &c.path);
             c.native_size = export::bitmap_native_size(&mut self.res, &c.path);
+            c.original_file_count = original::original_paths(&mut self.res, &c.path).len();
         }
         c.append_details();
+    }
+
+    /// 「导出原始文件」的内容：位图原样返回；XML 反编译为文本；
+    /// 引用了其它文件（adaptive-icon 的前景 / 背景等）时连同它们一起打成 zip。
+    pub fn export_original(&mut self, c: &IconCandidate) -> Option<Vec<u8>> {
+        if c.kind == IconKind::Bitmap {
+            return self.res.read_file(&c.path);
+        }
+        let mut files = original::original_files(&mut self.res, &c.path);
+        match files.len() {
+            0 => None,
+            1 => files.pop().map(|f| f.bytes),
+            _ => zip_files(&files)
+                .map_err(|e| log::warn!("icon: zip original files failed: {e}"))
+                .ok(),
+        }
     }
 }
 

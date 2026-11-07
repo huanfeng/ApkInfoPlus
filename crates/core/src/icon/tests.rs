@@ -538,9 +538,18 @@ fn real_apk_icons() {
         }
         for (i, c) in candidates.iter().enumerate() {
             println!(
-                "  [{i}] svg={} native={:?}",
-                c.svg_exportable, c.native_size
+                "  [{i}] svg={} native={:?} originals={}",
+                c.svg_exportable, c.native_size, c.original_file_count
             );
+            if let Some(bytes) = r.export_original(c) {
+                let ext = if c.original_is_bundle() {
+                    "zip"
+                } else {
+                    "orig"
+                };
+                std::fs::write(out.join(format!("{stem}_{i}_original.{ext}")), bytes)
+                    .expect("write original");
+            }
             match r.render_candidate(c, DEFAULT_ICON_SIZE, false) {
                 Ok(img) => {
                     let file = out.join(format!("{stem}_{i}.png"));

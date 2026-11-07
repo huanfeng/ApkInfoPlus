@@ -83,6 +83,15 @@ impl IconSession {
         self.read(&c.path)
     }
 
+    /// 「导出原始文件」的内容，规则见 [`IconRenderer::export_original`]。
+    pub fn export_original(&mut self, c: &IconCandidate) -> Option<Vec<u8>> {
+        if c.path == ARCHIVE_ICON_PATH {
+            return self.archive_icon.clone();
+        }
+        let (resources, me) = self.renderer();
+        IconRenderer::new(me, &resources).export_original(c)
+    }
+
     /// 导出 PNG 的文件内容，规则见 [`icon::export_png_bytes`]。
     pub fn export_png(&mut self, c: &IconCandidate, default_size: u32) -> Result<Vec<u8>, String> {
         let raw = self.raw_bytes(c);

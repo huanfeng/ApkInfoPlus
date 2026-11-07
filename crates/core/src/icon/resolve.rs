@@ -166,6 +166,8 @@ fn res_ref(id: u32) -> String {
 struct Entry {
     /// 小写 `type/key`
     name: String,
+    /// 原样大小写的 `type/key`（反编译输出用）
+    display_name: String,
     file_paths: Vec<String>,
     colors: Vec<String>,
     references: Vec<String>,
@@ -182,9 +184,11 @@ impl ResTable {
     fn from_resources(resources: &BTreeMap<u32, ResourceInfo>) -> Self {
         let mut t = ResTable::default();
         for info in resources.values() {
-            let name = info.name().to_ascii_lowercase();
+            let display_name = info.name();
+            let name = display_name.to_ascii_lowercase();
             let mut e = Entry {
                 name: name.clone(),
+                display_name,
                 ..Default::default()
             };
             for p in &info.file_paths {
@@ -286,6 +290,39 @@ impl<'a> Resolver<'a> {
             .get(&n.to_ascii_lowercase())?
             .clone();
         self.source.read(&actual)
+    }
+
+    /// 资源 ID → `type/key`（原样大小写）；资源表里没有时为 `None`。
+    pub fn resource_name(&self, id: u32) -> Option<&str> {
+        self.table
+            .by_id
+            .get(&id)
+            .map(|e| e.display_name.as_str())
+            .filter(|n| !n.is_empty())
+    }
+
+    /// 资源 ID 指向的全部文件（各 density / 配置的变体），沿资源引用链展开。
+    pub fn resource_files(&self, id: u32, depth: u32) -> Vec<String> {
+        let Some(e) = self.table.by_id.get(&id) else {
+            return Vec::new();
+        };
+        let mut out = e.file_paths.clone();
+        if depth < MAX_DEPTH {
+            for r in &e.references {
+                let Some(next) = r
+                    .strip_prefix("@res/0x")
+                    .and_then(|h| u32::from_str_radix(h, 16).ok())
+                else {
+                    continue;
+                };
+                for p in self.resource_files(next, depth + 1) {
+                    if !out.contains(&p) {
+                        out.push(p);
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// 加载并缓存 XML 顶层元素。

@@ -42,6 +42,8 @@ pub struct IconCandidate {
     pub native_size: Option<u32>,
     /// 候选文件本身的字节数。
     pub file_size: Option<u64>,
+    /// XML 候选导出原始文件时涉及的文件数（含自身）；大于 1 时导出为 zip。
+    pub original_file_count: usize,
 }
 
 fn dpi_label_to_value(label: &str) -> Option<u32> {
@@ -107,7 +109,13 @@ impl IconCandidate {
             pixel_size: None,
             native_size: None,
             file_size: None,
+            original_file_count: 1,
         }
+    }
+
+    /// 「导出原始文件」会打包成 zip（XML 引用了其它文件）。
+    pub fn original_is_bundle(&self) -> bool {
+        self.kind == IconKind::XmlVector && self.original_file_count > 1
     }
 
     /// 在标签后追加分辨率与文件大小，便于在多个候选里挑最优。

@@ -504,10 +504,15 @@ pub fn export_original(state: &AppState, doc: &Rc<Doc>, ctx: &mut EventCtx) {
         return;
     };
     let fallback: Option<Rc<RgbaImage>> = doc.icon.with(|v| v.first().cloned());
-    let ext = Path::new(&candidate.path)
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_else(|| "png".into());
+    // XML 引用了其它文件（前景 / 背景等）时连同它们打包成 zip；单个 XML 导出为反编译后的文本。
+    let ext = if candidate.original_is_bundle() {
+        "zip".to_string()
+    } else {
+        Path::new(&candidate.path)
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_else(|| "png".into())
+    };
     let tx = state.tx.clone();
     let dlg = PickDialog::new()
         .title(tr!("action.export_icon"))
@@ -517,8 +522,8 @@ pub fn export_original(state: &AppState, doc: &Rc<Doc>, ctx: &mut EventCtx) {
         let fallback = fallback.map(|f| (*f).clone());
         thread::spawn(move || {
             let bytes = match session.lock() {
-                Ok(mut s) => s.raw_bytes(&candidate),
-                Err(p) => p.into_inner().raw_bytes(&candidate),
+                Ok(mut s) => s.export_original(&candidate),
+                Err(p) => p.into_inner().export_original(&candidate),
             }
             .or_else(|| fallback.map(|f| encode_png(&f)));
             let result = match bytes {
