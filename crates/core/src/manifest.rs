@@ -99,6 +99,12 @@ pub fn parse_manifest(doc: &XmlElement) -> ApkMeta {
             meta.application_name = guess_class_name(app);
         }
         meta.components = collect_components(app, meta.package_name.as_deref());
+        meta.banner = attr(app, "banner").or_else(|| {
+            app.children
+                .iter()
+                .filter(|c| c.name == "activity" || c.name == "activity-alias")
+                .find_map(|c| attr(c, "banner"))
+        });
         for activity in &app.children {
             if activity.name != "activity" && activity.name != "activity-alias" {
                 continue;
@@ -351,7 +357,11 @@ mod tests {
                             &[("name", ".Main"), ("label", "Main")],
                             vec![launcher_filter()],
                         ),
-                        el("activity", &[("name", ".Other")], vec![]),
+                        el(
+                            "activity",
+                            &[("name", ".Other"), ("banner", "@res/0x7f030000")],
+                            vec![],
+                        ),
                         el(
                             "activity-alias",
                             &[("name", ".Alias")],
@@ -377,6 +387,8 @@ mod tests {
         );
         assert_eq!(meta.label.as_deref(), Some("@res/0x7f010000"));
         assert_eq!(meta.application_icon.as_deref(), Some("@res/0x7f020000"));
+        // application 没有 banner 时取 activity 上的（TV 启动 activity 常这么写）
+        assert_eq!(meta.banner.as_deref(), Some("@res/0x7f030000"));
         let names: Vec<_> = meta
             .launchable_activities
             .iter()

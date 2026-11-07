@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 
 use crate::model::ResourceInfo;
 
-pub use candidates::{collect_candidates, IconCandidate, IconKind};
+pub use candidates::{banner_candidates, collect_candidates, IconCandidate, IconKind};
 pub use original::{zip_files, OriginalFile};
 
 /// 图标文件访问。

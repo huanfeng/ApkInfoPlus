@@ -143,6 +143,39 @@ fn display_label(path: &str, kind: IconKind, dpi_label: Option<&str>) -> String 
     }
 }
 
+/// Android TV 横幅（`android:banner`）的候选：资源的全部变体按 [`file_score`] 从好到差，
+/// 已在 `existing` 里的跳过；标签带 `TV banner` 前缀以和启动图标区分。
+pub fn banner_candidates(
+    resources: &BTreeMap<u32, ResourceInfo>,
+    banner: Option<&str>,
+    existing: &[IconCandidate],
+) -> Vec<IconCandidate> {
+    let Some(info) = banner
+        .and_then(crate::apk::parse_res_ref)
+        .and_then(|id| resources.get(&id))
+    else {
+        return Vec::new();
+    };
+    let mut paths: Vec<String> = info
+        .file_paths
+        .iter()
+        .map(|p| normalize_zip_path(p))
+        .collect();
+    // 先按路径排序去重，再按分数稳定排序：同分时顺序确定
+    paths.sort();
+    paths.dedup();
+    sort_by_file_score(&mut paths);
+    paths
+        .into_iter()
+        .filter(|p| !existing.iter().any(|c| &c.path == p))
+        .map(|p| {
+            let mut c = IconCandidate::from_path(&p, None);
+            c.display_label = format!("TV banner · {}", c.display_label);
+            c
+        })
+        .collect()
+}
+
 /// 未知路径的启发式打分（`_unknownPathScore`）。
 pub(crate) fn unknown_path_score(candidate: &str) -> i32 {
     let l = candidate.to_ascii_lowercase();
@@ -375,6 +408,38 @@ pub fn collect_candidates(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn banner_candidates_best_first_and_labeled() {
+        let mut resources = BTreeMap::new();
+        resources.insert(
+            0x7f080010,
+            ResourceInfo {
+                resource_id: 0x7f080010,
+                type_name: "drawable".into(),
+                key_name: "tv_banner".into(),
+                file_paths: vec![
+                    "res/drawable-mdpi/tv_banner.png".into(),
+                    "res/drawable-xhdpi/tv_banner.png".into(),
+                    "res/drawable-mdpi/tv_banner.png".into(),
+                ],
+                ..Default::default()
+            },
+        );
+        let existing = vec![IconCandidate::from_path(
+            "res/drawable-mdpi/tv_banner.png",
+            None,
+        )];
+        let got = banner_candidates(&resources, Some("@res/0x7f080010"), &existing);
+        let labels: Vec<_> = got.iter().map(|c| c.display_label.as_str()).collect();
+        assert_eq!(labels, vec!["TV banner · PNG tv_banner (xhdpi)"]);
+        assert!(banner_candidates(&resources, None, &[]).is_empty());
+        assert!(banner_candidates(&resources, Some("@res/0x7f999999"), &[]).is_empty());
+        assert_eq!(
+            banner_candidates(&resources, Some("@res/0x7f080010"), &[]).len(),
+            2
+        );
+    }
     use crate::icon::resolve::tests::{res, MemSource};
 
     #[test]

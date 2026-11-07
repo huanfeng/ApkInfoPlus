@@ -241,6 +241,9 @@ fn finish(
         c.display_label = format!("PNG icon ({})", kind.display_name());
         candidates.insert(0, c);
     }
+    let banners =
+        icon::banner_candidates(&session.resources, info.meta.banner.as_deref(), &candidates);
+    candidates.extend(banners);
     {
         let (resources, me) = session.renderer();
         let mut renderer = IconRenderer::new(me, &resources);

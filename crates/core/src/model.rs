@@ -25,6 +25,8 @@ pub struct ApkMeta {
     pub application_icon: Option<String>,
     /// density → 图标文件路径（来自资源表的全部 density 变体）。
     pub icon_paths: BTreeMap<u32, String>,
+    /// Android TV 横幅 `android:banner` 的原始值：`<application>` 上的优先，其次第一个声明了它的 activity。
+    pub banner: Option<String>,
 
     pub permissions: Vec<String>,
     pub features: Vec<String>,
