@@ -116,8 +116,7 @@ impl<'a> IconRenderer<'a> {
         if c.kind == IconKind::Bitmap {
             c.pixel_size = bytes.as_deref().and_then(bitmap_dimensions);
         } else {
-            c.svg_exportable = export::has_vector(&mut self.res, &c.path);
-            c.native_size = export::bitmap_native_size(&mut self.res, &c.path);
+            (c.svg_exportable, c.native_size) = export::inspect(&mut self.res, &c.path);
             c.original_file_count = original::original_paths(&mut self.res, &c.path).len();
         }
         c.append_details();
@@ -150,7 +149,7 @@ pub(crate) fn bitmap_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 }
 
 /// 导出 PNG：源文件本身就是 PNG 的位图候选直接返回原字节（无损且不变大），
-/// 其余渲染后编码；由位图组成的 XML 候选按 `native_size` 渲染，其余用 `default_size`。
+/// 其余渲染后编码；位图与由位图组成的 XML 候选按自身分辨率渲染，矢量用 `default_size`。
 pub fn export_png_bytes(
     c: &IconCandidate,
     raw: Option<Vec<u8>>,
@@ -162,7 +161,8 @@ pub fn export_png_bytes(
             return Some(bytes);
         }
     }
-    let img = render(c.native_size.unwrap_or(default_size))?;
+    let own = c.native_size.or(c.pixel_size.map(|(w, h)| w.max(h)));
+    let img = render(own.unwrap_or(default_size))?;
     let png = encode_png(&img);
     (!png.is_empty()).then_some(png)
 }

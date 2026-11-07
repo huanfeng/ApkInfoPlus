@@ -526,8 +526,9 @@ impl Ctx<'_, '_> {
     }
 
     fn render_inset(&mut self, canvas: &mut Canvas, rect: Rect, root: &XmlElement, depth: u32) {
-        let (l, t, r, b) = self.insets(root, rect);
-        let inner = rect.inset(l, t, r, b);
+        // 与 SVG 导出同一规则：百分比相对自身，dp 相对 108dp 图层（见 `export::inset_fractions`）。
+        let [l, t, r, b] = super::export::inset_fractions(root);
+        let inner = rect.inset(l * rect.w, t * rect.h, r * rect.w, b * rect.h);
         if !inner.is_empty() {
             self.render_container(canvas, inner, root, depth + 1);
         }

@@ -54,7 +54,12 @@ pub(crate) fn original_files(res: &mut Resolver, path: &str) -> Vec<OriginalFile
     original_paths(res, path)
         .into_iter()
         .filter_map(|p| {
-            let bytes = match res.load_xml(&p).filter(|_| is_xml_path(&p)) {
+            let xml = if is_xml_path(&p) {
+                res.load_xml(&p)
+            } else {
+                None
+            };
+            let bytes = match xml {
                 Some(root) => to_text_xml(res, &root).into_bytes(),
                 None => res.read_file(&p)?,
             };
@@ -88,7 +93,7 @@ fn collect_refs(res: &Resolver, e: &XmlElement, depth: u32, out: &mut Vec<String
     for v in values {
         let v = v.trim();
         if let Some(id) = ref_id(v) {
-            out.extend(res.resource_files(id, 0));
+            out.extend(res.resource_files(id));
         } else if v.starts_with("res/") && looks_like_zip_path(v) {
             out.push(normalize_zip_path(v));
         }

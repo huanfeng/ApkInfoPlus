@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use apkinfo_core::icon::{encode_png, IconCandidate, RgbaImage};
+use apkinfo_core::icon::{encode_png, IconCandidate, IconKind, RgbaImage};
 use apkinfo_core::info::ArchiveKind;
 use windui::core::EventCtx;
 use windui::event::MenuItem;
@@ -525,7 +525,12 @@ pub fn export_original(state: &AppState, doc: &Rc<Doc>, ctx: &mut EventCtx) {
                 Ok(mut s) => s.export_original(&candidate),
                 Err(p) => p.into_inner().export_original(&candidate),
             }
-            .or_else(|| fallback.map(|f| encode_png(&f)));
+            // 预览图兜底只适用于位图：zip / 文本 XML 导出失败时写 PNG 字节会得到损坏的文件。
+            .or_else(|| {
+                (candidate.kind == IconKind::Bitmap)
+                    .then(|| fallback.map(|f| encode_png(&f)))
+                    .flatten()
+            });
             let result = match bytes {
                 Some(b) => std::fs::write(&dest, b)
                     .map(|_| dest)

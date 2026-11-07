@@ -71,7 +71,7 @@ fn element_layer(res: &mut Resolver, e: &XmlElement, depth: u32) -> Option<Layer
 }
 
 /// `<inset>` 的四边内缩比例（左 / 上 / 右 / 下）：百分比直接换算，dp 相对 108dp 图层。
-fn inset_fractions(e: &XmlElement) -> [f32; 4] {
+pub(crate) fn inset_fractions(e: &XmlElement) -> [f32; 4] {
     let frac = |raw: Option<&str>| -> Option<f32> {
         let raw = raw?;
         let v = parse_dimension(Some(raw), 0.0);
@@ -149,18 +149,18 @@ pub(crate) fn export_svg(res: &mut Resolver, icon_path: &str) -> Option<String> 
     }
 }
 
-/// XML 候选能导出成真正的（含矢量的）SVG。
-pub(crate) fn has_vector(res: &mut Resolver, icon_path: &str) -> bool {
-    resolve_export(res, icon_path).is_some_and(|e| e.has_vector())
+/// XML 候选的导出能力，一次解析得出：(能导出含矢量的 SVG, 位图图层最大边长)。
+/// 后者仅在不含 vector 时有值（矢量无固有分辨率），让纯位图的 adaptive-icon / inset
+/// 按原始分辨率导出 PNG，而不是放大到固定尺寸。
+pub(crate) fn inspect(res: &mut Resolver, icon_path: &str) -> (bool, Option<u32>) {
+    match resolve_export(res, icon_path) {
+        Some(export) if export.has_vector() => (true, None),
+        Some(export) => (false, bitmap_native_size(export)),
+        None => (false, None),
+    }
 }
 
-/// XML 候选里各位图图层的最大边长（像素）；含 vector 时为 `None`（矢量无固有分辨率）。
-/// 用于让纯位图的 adaptive-icon / inset 按原始分辨率导出，而不是放大到固定尺寸。
-pub(crate) fn bitmap_native_size(res: &mut Resolver, icon_path: &str) -> Option<u32> {
-    let export = resolve_export(res, icon_path)?;
-    if export.has_vector() {
-        return None;
-    }
+fn bitmap_native_size(export: Export) -> Option<u32> {
     let layers: Vec<Layer> = match export {
         Export::Adaptive(data) => [data.background, data.foreground]
             .into_iter()

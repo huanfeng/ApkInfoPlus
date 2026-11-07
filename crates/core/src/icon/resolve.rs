@@ -2,7 +2,7 @@
 //! `_resolveResourceReference` / `_resolveEntryValue` / `_findFileByResourceName` /
 //! `_resolveColorRef` / `_resolveVectorFill` / `_readZipFile` 等。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -301,26 +301,28 @@ impl<'a> Resolver<'a> {
             .filter(|n| !n.is_empty())
     }
 
-    /// 资源 ID 指向的全部文件（各 density / 配置的变体），沿资源引用链展开。
-    pub fn resource_files(&self, id: u32, depth: u32) -> Vec<String> {
-        let Some(e) = self.table.by_id.get(&id) else {
-            return Vec::new();
-        };
-        let mut out = e.file_paths.clone();
-        if depth < MAX_DEPTH {
-            for r in &e.references {
-                let Some(next) = r
-                    .strip_prefix("@res/0x")
-                    .and_then(|h| u32::from_str_radix(h, 16).ok())
-                else {
-                    continue;
-                };
-                for p in self.resource_files(next, depth + 1) {
-                    if !out.contains(&p) {
-                        out.push(p);
-                    }
+    /// 资源 ID 指向的全部文件（各 density / 配置的变体），沿资源引用链展开；
+    /// 每个 ID 只展开一次，互相引用的资源不会指数级重复递归。
+    pub fn resource_files(&self, id: u32) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut visited = HashSet::new();
+        let mut stack = vec![id];
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) || visited.len() > 256 {
+                continue;
+            }
+            let Some(e) = self.table.by_id.get(&id) else {
+                continue;
+            };
+            for p in &e.file_paths {
+                if !out.contains(p) {
+                    out.push(p.clone());
                 }
             }
+            stack.extend(e.references.iter().rev().filter_map(|r| {
+                r.strip_prefix("@res/0x")
+                    .and_then(|h| u32::from_str_radix(h, 16).ok())
+            }));
         }
         out
     }

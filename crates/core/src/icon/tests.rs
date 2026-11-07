@@ -435,8 +435,22 @@ fn png_export_writes_original_png_bytes() {
             data: vec![0; 4],
         })
     });
-    assert_eq!(size, Some(1024));
+    // 位图按自身分辨率（最长边）渲染，不放大到默认尺寸
+    assert_eq!(size, Some(300));
     assert!(out.is_some_and(|b| b.starts_with(b"\x89PNG")));
+}
+
+#[test]
+fn raster_inset_matches_svg_export() {
+    // 10.8dp / 108dp = 10%：SVG 导出与光栅渲染都应内缩 10%
+    let (mut src, map) = inset_apk(true);
+    let mut r = IconRenderer::new(&mut src, &map);
+    let img = r
+        .render_path("res/drawable/inset_vector.xml", 100, true)
+        .expect("render");
+    assert_eq!(img_px(&img, 5, 50)[3], 0, "内缩区应透明");
+    assert_eq!(img_px(&img, 15, 50), [0, 255, 0, 255], "内容从 10% 处开始");
+    assert_eq!(img_px(&img, 95, 50)[3], 0, "右侧内缩区应透明");
 }
 
 #[test]

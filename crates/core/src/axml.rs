@@ -680,11 +680,7 @@ fn format_value(
         RES_TYPE_FLOAT => dart_double(f32::from_bits(u) as f64),
         RES_TYPE_DIMENSION => format_dimension(u),
         // 分数以 0..1 存储，源码写法是百分比（`16.6667%` / `50%p`）。
-        RES_TYPE_FRACTION => format!(
-            "{}{}",
-            dart_double(complex_value(u) * 100.0),
-            fraction_unit(u)
-        ),
+        RES_TYPE_FRACTION => format!("{}{}", f32_text(complex_value(u) * 100.0), fraction_unit(u)),
         RES_TYPE_DYNAMIC_REFERENCE => format!("@dyn/0x{:x}", data as u32),
         RES_TYPE_INT_DEC => data.to_string(),
         RES_TYPE_INT_HEX => format!("0x{u:x}"),
@@ -732,9 +728,20 @@ fn complex_value(data: u32) -> f64 {
 pub(crate) fn format_dimension(value: u32) -> String {
     format!(
         "{}{}",
-        dart_double(complex_value(value)),
+        f32_text(complex_value(value)),
         dimension_unit(value)
     )
+}
+
+/// complex 值的精度只有 f32（Android 返回 float）：按 f32 最短往返写法输出，
+/// 免得 `16.6667%` 变成 `16.666662693023682%`。
+fn f32_text(v: f64) -> String {
+    let narrow = v as f32;
+    let shortest = narrow
+        .to_string()
+        .parse::<f64>()
+        .unwrap_or(f64::from(narrow));
+    dart_double(shortest)
 }
 
 fn dimension_unit(data: u32) -> &'static str {
@@ -1116,6 +1123,11 @@ pub(crate) mod tests {
             "50.0%p"
         );
         assert_eq!(format_value(RES_TYPE_FRACTION, 0x100, -1, &s, 0), "100.0%");
+        // aapt2 为 16.6667% 写入的值：0.166667 → 尾数 1398104 × 2^-23
+        assert_eq!(
+            format_value(RES_TYPE_FRACTION, (1_398_104 << 8) | (3 << 4), -1, &s, 0),
+            "16.666698%"
+        );
         assert_eq!(format_value(0x42, 0x10, -1, &s, 0), "0x10");
         assert_eq!(format_value(RES_TYPE_NULL, 0, -1, &s, 0), "<undefined>");
         assert_eq!(format_value(RES_TYPE_NULL, 1, -1, &s, 0), "<empty>");
