@@ -56,23 +56,13 @@
 
 ## 安装
 
-从 [Releases](https://github.com/huanfeng/ApkInfoPlus/releases) 下载：
+从 [Releases](https://github.com/xlzhen-940218/ApkInfoPlus/releases) 下载：
 
 | 平台 | 文件 |
 |---|---|
 | Windows x64（安装版，推荐） | `ApkInfoPlus-<版本>-windows-x86_64-setup.exe`（安装后自动注册 `.apk` 等文件关联，无需管理员权限） |
-| Windows x64（便携版） | `ApkInfoPlus-<版本>-windows-x86_64.zip`（解压即用） |
-| macOS（Apple Silicon / Intel 通用） | `ApkInfoPlus-<版本>-macos-universal.dmg` |
-| Linux x64 | `ApkInfoPlus-<版本>-linux-x86_64.AppImage` 或 `.tar.gz` |
 
 Windows 用户推荐下载 **`ApkInfoPlus-0.4.0-windows-x86_64-setup.exe`**：安装完成后，双击任意 `.apk` 文件即可用 APK Info Plus 打开。
-
-Windows 也可以用 [Scoop](https://scoop.sh)：
-
-```powershell
-scoop bucket add huanfeng https://github.com/huanfeng/scoop-bucket
-scoop install apkinfoplus
-```
 
 ## 快捷键
 
