@@ -11,6 +11,7 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-changed=assets/windows/app.rc");
     println!("cargo:rerun-if-changed=assets/windows/app.ico");
+    println!("cargo:rerun-if-changed=assets/windows/apk.ico");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }

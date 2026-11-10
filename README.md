@@ -51,7 +51,7 @@
 **日常使用**
 - 拖入 / 命令行 / 再次启动传入的多个文件同时打开，侧栏可搜索、单个或全部关闭，各文件记住停留的标签页
 - 文件重命名（预设模板，含「名称 + 版本号 + ABI」；校验非法字符与同名）、复制路径、在文件管理器中显示
-- Windows / Linux 可在设置里注册文件关联；macOS 由 .app 声明文档类型
+- Windows 可用安装版自动注册 `.apk` 等文件关联，便携版 / Linux 可在设置里注册文件关联；macOS 由 .app 声明文档类型
 - 界面语言 简体中文 / 繁體中文（台灣、香港）/ English / 日本語 / 한국어，切换即时生效
 
 ## 安装
@@ -60,9 +60,12 @@
 
 | 平台 | 文件 |
 |---|---|
-| Windows x64 | `ApkInfoPlus-<版本>-windows-x86_64.zip`（解压即用） |
+| Windows x64（安装版，推荐） | `ApkInfoPlus-<版本>-windows-x86_64-setup.exe`（安装后自动注册 `.apk` 等文件关联，无需管理员权限） |
+| Windows x64（便携版） | `ApkInfoPlus-<版本>-windows-x86_64.zip`（解压即用） |
 | macOS（Apple Silicon / Intel 通用） | `ApkInfoPlus-<版本>-macos-universal.dmg` |
 | Linux x64 | `ApkInfoPlus-<版本>-linux-x86_64.AppImage` 或 `.tar.gz` |
+
+Windows 用户推荐下载 **`ApkInfoPlus-0.4.0-windows-x86_64-setup.exe`**：安装完成后，双击任意 `.apk` 文件即可用 APK Info Plus 打开。
 
 Windows 也可以用 [Scoop](https://scoop.sh)：
 

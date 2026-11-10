@@ -7,6 +7,8 @@
 #define VFT2_UNKNOWN 0x0L
 
 1 ICON "app.ico"
+// 2 = .apk 文件关联的图标（APK.svg 转出的 ico），DefaultIcon 以资源 ID 引用。
+2 ICON "apk.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION     0,4,0,0

@@ -153,10 +153,19 @@ mod imp {
         })
     }
 
+    /// `.apk` 用 exe 内的第 2 个图标资源（Android 图标，见 app.rc），其余用程序图标。
+    /// 负数表示资源 ID，正数表示图标序号。
+    fn icon_for(ext: &str, exe: &std::path::Path) -> String {
+        if ext == "apk" {
+            format!("\"{}\",-2", exe.display())
+        } else {
+            format!("\"{}\",0", exe.display())
+        }
+    }
+
     pub fn register() -> Result<(), String> {
         let exe = current_exe()?;
         let cmd = open_command(&exe);
-        let icon = format!("\"{}\",0", exe.display());
         for ext in EXTENSIONS {
             let pid = prog_id(ext);
             let pkey = format!(r"{}\{}", CLASSES, pid);
@@ -165,7 +174,11 @@ mod imp {
                 None,
                 &format!("{} ({})", crate::state::APP_TITLE, ext.to_uppercase()),
             )?;
-            reg_set(&format!(r"{}\DefaultIcon", pkey), None, &icon)?;
+            reg_set(
+                &format!(r"{}\DefaultIcon", pkey),
+                None,
+                &icon_for(ext, &exe),
+            )?;
             reg_set(&format!(r"{}\shell\open\command", pkey), None, &cmd)?;
             let ekey = format!(r"{}\.{}", CLASSES, ext);
             reg_set(&ekey, None, &pid)?;
