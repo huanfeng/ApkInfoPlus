@@ -33,6 +33,23 @@ fn main() {
 
     // 命令行里存在的受支持文件全部打开；其余参数（--screenshot 等）留给 windui。
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // 安装器调用：注册 / 取消 .apk 等文件关联后立即退出，不创建窗口。
+    for flag in ["--register-association", "--unregister-association"] {
+        if args.iter().any(|a| a == flag) {
+            let result = if flag == "--register-association" {
+                assoc::register()
+            } else {
+                assoc::unregister()
+            };
+            std::process::exit(match result {
+                Ok(()) => 0,
+                Err(e) => {
+                    log::error!("{flag} 失败：{e}");
+                    1
+                }
+            });
+        }
+    }
     let initial_files: Vec<PathBuf> = supported_files(&args);
     let screenshot_mode = args.iter().any(|a| a == "--screenshot");
     // `--lang zh-CN`：调试 / 截图时强制语言，不写进配置。
