@@ -1,186 +1,190 @@
 # APK Info Plus
 
+English | [简体中文](README.zh-CN.md)
+
 [![CI](https://github.com/huanfeng/ApkInfoPlus/actions/workflows/ci.yml/badge.svg)](https://github.com/huanfeng/ApkInfoPlus/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/huanfeng/ApkInfoPlus)](https://github.com/huanfeng/ApkInfoPlus/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-轻量、跨平台（Windows / macOS / Linux）的 Android 安装包查看与安装工具。拖一个 APK / XAPK / APKM / APKS / AAB 进来，
-包信息、图标、权限、签名证书、用到的第三方 SDK 一眼看全，还能直接装到手机上。
+A lightweight, cross-platform (Windows / macOS / Linux) viewer and installer for Android packages. Drop in an APK / XAPK / APKM / APKS / AAB file and see package details, icons, permissions, signature certificates and third-party SDKs at a glance — and install straight to a connected phone.
 
-由 Flutter 版 [ApkInfoTool](https://github.com/huanfeng/ApkInfoTool) 用 Rust + [windui](https://github.com/huanfeng/wind-ui-rust) 重写而来：
-功能保留并增强，体积、启动速度与内存占用按原生桌面工具的标准重做。
+A Rust + [windui](https://github.com/huanfeng/wind-ui-rust) rewrite of the Flutter app [ApkInfoTool](https://github.com/huanfeng/ApkInfoTool):
+same features with enhancements, rebuilt to native desktop standards for size, startup speed and memory use.
 
-| 概览（Chrome，浅色） | 库识别（YouTube，深色） |
+The interface follows the system language automatically — English unless a Chinese locale is detected — and can be switched anytime in Settings (six languages).
+
+| Overview (Chrome, light) | Library detection (YouTube, dark) |
 |---|---|
-| ![概览](docs/images/overview.png) | ![库识别](docs/images/libraries-dark.png) |
+| ![Overview](docs/images/overview-en.png) | ![Library detection](docs/images/libraries-dark-en.png) |
 
-## 亮点
+## Highlights
 
-- **解析零依赖**：纯 Rust 解析 AndroidManifest.xml、resources.arsc、签名块与 DEX，不需要 aapt2、apksigner 或 Java；单个可执行文件，Windows 压缩包约 3–4 MB
-- **快**：100–200 MB 的 APK 从打开到解析完成（含 DEX 扫描与库识别）在半秒以内
-- **看得出用了什么 SDK**：基于 [LibChecker-Rules](https://github.com/LibChecker/LibChecker-Rules) 识别原生库、四大组件与 DEX 包里的第三方 SDK（推送、统计、广告、热修复、Jetpack 等），还能看出 Kotlin / Jetpack Compose / 加固
-- **装得上**：多设备、多分包、OBB 一起推，失败原因直接给出；没装 adb 时可在设置里一键下载 platform-tools
-- **原生桌面体验**：多文件侧栏、几乎所有字段可选中复制、完整快捷键、单实例、浅色 / 深色主题、6 种界面语言即时切换
+- **Zero-dependency parsing**: pure Rust parsing of AndroidManifest.xml, resources.arsc, signing blocks and DEX — no aapt2, apksigner or Java; a single executable, roughly 3–4 MB in the zipped Windows package
+- **Fast**: opening a 100–200 MB APK through parsing (including DEX scan and library identification) takes well under half a second
+- **See which SDKs are used**: identifies native libraries, the four component types and third-party SDKs in DEX packages (push, analytics, ads, hot-fix, Jetpack, …) based on [LibChecker-Rules](https://github.com/LibChecker/LibChecker-Rules), and also shows Kotlin / Jetpack Compose / packer detection
+- **Installs for real**: multiple devices, split APKs and OBB pushed together, failure reasons given directly; one-click platform-tools download from Settings when adb is missing
+- **Native desktop experience**: multi-file sidebar, nearly every field selectable and copyable, full keyboard shortcuts, single instance, light / dark theme, 6 UI languages with instant switching
 
-## 功能
+## Features
 
-**包信息**
-- APK / XAPK / APKM / APKS / AAB（以及装着 APK 的 .zip）：包名、版本、SDK、权限、硬件特性、屏幕尺寸与密度、ABI、语言列表、启动 Activity
-- AAB 直接在本地解析，支持查看模块中的 DEX、原生库和组件。AAB 仅用于查看，安装入口适用于 APK 及 APK 归档。
-- 归档包读取 manifest.json，列出分包（按基础 / 语言 / ABI / 密度分类）与 OBB
-- 权限表：系统官方的权限标题与说明（随界面语言），按风险分级（高风险 / 敏感 / 普通 / 系统）排序，悬停可看 Android 保护级别
-- 语言列表点开逐条列出代码、名称与自称；硬件 / 软件特性附中文说明与「必需 / 可选」；minSdk / targetSdk 悬停显示系统版本与发布时间
-- 混淆 APK 容错；应用名可在各语言之间切换；「文本信息」页提供 aapt2 `dump badging` 风格的输出
+**Package info**
+- APK / XAPK / APKM / APKS / AAB (and .zip archives containing APKs): package name, version, SDK levels, permissions, hardware features, screen sizes and densities, ABIs, locale list, launcher activity
+- AAB is parsed locally, including DEX, native libraries and components in each module. AAB is view-only; the install action applies to APKs and APK archives.
+- Archive bundles read manifest.json, listing splits (grouped by base / language / ABI / density) and OBB
+- Permissions table: official permission titles and descriptions (in the UI language), sorted by risk level (high / sensitive / normal / system), hover to see the Android protection level
+- Locale list opens into per-entry code, name and autonym; hardware / software features carry descriptions and "required / optional"; minSdk / targetSdk hover shows the OS version and release date
+- Tolerates obfuscated APK containers; app name can be switched among languages; the "Text Info" page provides aapt2 `dump badging`-style output
 
-**图标**
-- 位图 / VectorDrawable / adaptive-icon / layer-list / shape 全部渲染，多个候选间切换，导出 PNG / SVG / 原始文件
+**Icons**
+- Bitmap / VectorDrawable / adaptive-icon / layer-list / shape all rendered, switch among candidates, export PNG / SVG / raw file
 
-**签名与校验**
-- v1（PKCS#7）与 v2 / v3 / v3.1（APK Signing Block）证书：DN、序列号、有效期、SHA-256 / SHA-1 / MD5 指纹、密钥算法与长度
-- 后台流式计算文件 MD5 / SHA1
+**Signature & checksums**
+- v1 (PKCS#7) and v2 / v3 / v3.1 (APK Signing Block) certificates: DN, serial number, validity, SHA-256 / SHA-1 / MD5 fingerprints, key algorithm and length
+- Background streaming MD5 / SHA1 of the file
 
-**库识别**
-- 原生库：按 SDK 分组，显示厂商图标、库名与 ABI；未识别的库单独列出并给出大小
-- 组件：Activity / Service / Receiver / Provider 按名字或 intent-filter action 命中
-- DEX：扫描 `classes*.dex` 定义的类，按包名前缀识别 SDK
-- 点开任一 SDK 可看描述、开发团队、来源链接与规则贡献者；规则可在设置里在线更新，设计见 [docs/libchecker.md](docs/libchecker.md)
+**Library detection**
+- Native libraries grouped by SDK with vendor icon, library name and ABI; unidentified libraries listed separately with sizes
+- Components: Activity / Service / Receiver / Provider matched by name or intent-filter action
+- DEX: scans classes defined in `classes*.dex` and identifies SDKs by package prefix
+- Click any SDK for description, developer team, source links and rule contributors; rules can be updated online in Settings, see [docs/libchecker.md](docs/libchecker.md) for the design
 
-**安装（adb）**
-- 独立安装窗口：多设备、`install` / `install-multiple`、OBB 推送、`-r -d -t -g` 选项、分包勾选、进度日志与取消
+**Install (adb)**
+- Dedicated install window: multiple devices, `install` / `install-multiple`, OBB push, `-r -d -t -g` options, split selection, progress log and cancel
 
-**日常使用**
-- 拖入 / 命令行 / 再次启动传入的多个文件同时打开，侧栏可搜索、单个或全部关闭，各文件记住停留的标签页
-- 文件重命名（预设模板，含「名称 + 版本号 + ABI」；校验非法字符与同名）、复制路径、在文件管理器中显示
-- Windows / Linux 可在设置里注册文件关联；macOS 由 .app 声明文档类型
-- 界面语言 简体中文 / 繁體中文（台灣、香港）/ English / 日本語 / 한국어，切换即时生效
+**Everyday use**
+- Multiple files open at once via drag-and-drop / command line / arguments passed to a second launch; searchable sidebar, close one or all, each file remembers its active tab
+- File renaming (preset templates, including "name + version + ABI"; invalid characters and name clashes rejected), copy path, show in file manager
+- File associations can be registered from Settings on Windows / Linux; on macOS document types are declared by the .app
+- UI languages: 简体中文 / 繁體中文（台灣、香港）/ English / 日本語 / 한국어, instant switching
 
-## 安装
+## Installation
 
-从 [Releases](https://github.com/huanfeng/ApkInfoPlus/releases) 下载：
+Download from [Releases](https://github.com/huanfeng/ApkInfoPlus/releases):
 
-| 平台 | 文件 |
+| Platform | File |
 |---|---|
-| Windows x64 | `ApkInfoPlus-<版本>-windows-x86_64.zip`（解压即用） |
-| macOS（Apple Silicon / Intel 通用） | `ApkInfoPlus-<版本>-macos-universal.dmg` |
-| Linux x64 | `ApkInfoPlus-<版本>-linux-x86_64.AppImage` 或 `.tar.gz` |
+| Windows x64 | `ApkInfoPlus-<version>-windows-x86_64.zip` (unzip and run) |
+| macOS (Apple Silicon / Intel universal) | `ApkInfoPlus-<version>-macos-universal.dmg` |
+| Linux x64 | `ApkInfoPlus-<version>-linux-x86_64.AppImage` or `.tar.gz` |
 
-Windows 也可以用 [Scoop](https://scoop.sh)：
+On Windows, [Scoop](https://scoop.sh) also works:
 
 ```powershell
 scoop bucket add huanfeng https://github.com/huanfeng/scoop-bucket
 scoop install apkinfoplus
 ```
 
-## 快捷键
+## Keyboard shortcuts
 
-| 键 | 作用 |
+| Key | Action |
 |---|---|
-| Ctrl+O | 打开文件 |
-| F5 | 重新解析 |
-| Ctrl+I | 安装 |
-| F2 | 重命名 |
-| Ctrl+W | 关闭当前文件 |
-| Ctrl+Tab / Ctrl+Shift+Tab | 切换文件 |
-| Ctrl+, | 设置 |
-| Esc | 关闭对话框 / 退出 |
+| Ctrl+O | Open file |
+| F5 | Reparse |
+| Ctrl+I | Install |
+| F2 | Rename |
+| Ctrl+W | Close current file |
+| Ctrl+Tab / Ctrl+Shift+Tab | Switch files |
+| Ctrl+, | Settings |
+| Esc | Close dialog / quit |
 
-## 常见问题
+## Troubleshooting
 
-- **macOS 提示「无法打开」**：dmg 只做了 ad-hoc 签名、未经 Apple 公证。第一次在 Finder 里右键「打开」，
-  或执行 `xattr -dr com.apple.quarantine "/Applications/APK Info Plus.app"`。
-- **Linux 运行依赖**：fontconfig（选字）与 X11 或 Wayland（设 `WINDUI_BACKEND=wayland`），不需要 GTK。
-  AppImage 在 Ubuntu 22.04 上构建，需要 glibc 2.35 或更新。
-- **安装时找不到设备**：需要 adb。设置 →「工具」里可以选系统 PATH 中的 adb、自定义路径，或一键下载 platform-tools。
-- **库识别没结果**：自己从源码构建时要先同步规则（见下文「构建」）；也可以在设置 →「工具」里点「检查更新」下载规则。
-  只能识别规则库收录的 SDK，被混淆改名的库识别不出来。
+- **macOS says the app "can't be opened"**: the dmg is ad-hoc signed and not notarized by Apple. Right-click → "Open" in Finder the first time, or run
+  `xattr -dr com.apple.quarantine "/Applications/APK Info Plus.app"`.
+- **Linux runtime dependencies**: fontconfig (font selection) and X11 or Wayland (set `WINDUI_BACKEND=wayland`); GTK is not required.
+  The AppImage is built on Ubuntu 22.04 and needs glibc 2.35 or newer.
+- **No device found when installing**: adb is required. Settings → "Tools" lets you pick adb from the system PATH, use a custom path, or download platform-tools with one click.
+- **Library detection shows nothing**: when building from source, sync the rules first (see "Building" below); you can also click "Check for updates" in Settings → "Tools" to download them.
+  Only SDKs covered by the rule set can be identified; libraries renamed by obfuscation cannot be.
 
-## 构建
+## Building
 
-`windui` 默认用 crates.io 的发布版。要连同本地的 `wind-ui-rust` 源码一起改，在仓库根目录建
-`.cargo/config.toml`（已在 .gitignore 里）：
+`windui` defaults to the crates.io release. To develop against a local `wind-ui-rust` checkout, create `.cargo/config.toml`
+at the repository root (already in .gitignore):
 
 ```toml
 [patch.crates-io]
-windui = { path = "../wind-ui-rust" }   # 相对仓库根目录
+windui = { path = "../wind-ui-rust" }   # relative to the repo root
 ```
 
-Windows 可执行文件的图标由 `crates/app/build.rs` 在构建时嵌入，
-需要 `rc.exe` / `llvm-rc` / `windres` 之一在 PATH 里，找不到时只是没有图标。
+The icon for the Windows executable is embedded at build time by `crates/app/build.rs`,
+which needs `rc.exe` / `llvm-rc` / `windres` on the PATH; if none is found the build just has no icon.
 
-库识别用的 LibChecker 规则不入库，构建前执行一次同步（CI 与 Release 每次都会拉上游最新版）：
+The LibChecker rules used for library detection are not committed; run the sync once before building
+(CI and Release always pull the latest upstream version):
 
 ```bash
-python3 scripts/sync-libchecker-rules.py      # 生成 crates/core/assets/libchecker/rules.zip，build.rs 内嵌
+python3 scripts/sync-libchecker-rules.py      # generates crates/core/assets/libchecker/rules.zip, embedded by build.rs
 ```
 
-没有规则包也能编译，只是库识别不可用（构建时会有 warning）。设计与匹配语义见 `docs/libchecker.md`。
+The build still compiles without a rule bundle; library detection is simply unavailable (a warning is shown).
 
-权限保护级别、各语言的权限文案与语言名称是生成后入库的（`crates/core/src/android/generated.rs`、
-`crates/app/i18n/android/`），换新 SDK 时重新生成一次即可，需要 aapt2 与 Node：
+Permission protection levels, per-language permission strings and locale names are generated and committed
+(`crates/core/src/android/generated.rs`, `crates/app/i18n/android/`); regenerate them when a new SDK ships, which needs aapt2 and Node:
 
 ```bash
-python3 scripts/gen-android-data.py           # 默认取 $ANDROID_HOME 下 API 最高的 android.jar
+python3 scripts/gen-android-data.py           # uses the highest-API android.jar under $ANDROID_HOME by default
 ```
 
-需要 Rust 1.85+（edition 2021，工作区使用 `std::sync::LazyLock` 等较新 API）。
+Rust 1.85+ is required (edition 2021; the workspace uses newer APIs such as `std::sync::LazyLock`).
 
 ```bash
-cargo build --release -p apkinfoplus          # 桌面应用：target/release/apkinfoplus
-cargo run -p apkinfoplus -- path/to/app.apk   # 直接打开文件
-cargo run -p apkinfo-core --bin apkinfo -- path/to/app.apk   # 命令行查看解析结果（aapt2 badging 风格）
-cargo run -p apkinfo-core --bin apkinfo -- libs path/to/app.apk   # 命令行查看库识别结果
+cargo build --release -p apkinfoplus          # desktop app: target/release/apkinfoplus
+cargo run -p apkinfoplus -- path/to/app.apk   # open a file directly
+cargo run -p apkinfo-core --bin apkinfo -- path/to/app.apk   # CLI view of the parse result (aapt2 badging style)
+cargo run -p apkinfo-core --bin apkinfo -- libs path/to/app.apk   # CLI view of library detection
 ```
 
-调试用参数（不写入配置）：`--lang zh-CN` 强制界面语言，`--theme dark|light` 强制主题，
-`--screenshot out.png [--click X Y]` 离屏渲染一帧（windui 提供，用于视觉回归）。
+Debug flags (not persisted to config): `--lang zh-CN` forces the UI language, `--theme dark|light` forces the theme,
+`--screenshot out.png [--click X Y]` renders one frame offscreen (provided by windui, for visual regression).
 
-## 仓库结构
+## Repository layout
 
 ```
-crates/core   apkinfo-core：解析核心库（zip / axml / arsc / manifest / icon / signature / adb / installer / tools）+ apkinfo 命令行
-crates/app    apkinfoplus：windui 桌面应用（ui / state / actions / config / i18n）
-packaging/                                                 macOS Info.plist、Linux .desktop
-scripts/                                                   版本号同步、LibChecker 规则同步、Android 权限 / 语言数据生成与各平台打包脚本
-docs/superpowers/specs/2026-10-21-apkinfoplus-design.md   设计文档
-docs/libchecker.md                                         库识别（LibChecker）设计
-docs/images/                                               README 截图
+crates/core   apkinfo-core: parsing core library (zip / axml / arsc / manifest / icon / signature / adb / installer / tools) + apkinfo CLI
+crates/app    apkinfoplus: windui desktop app (ui / state / actions / config / i18n)
+packaging/                                                 macOS Info.plist, Linux .desktop
+scripts/                                                   version sync, LibChecker rule sync, Android permission / locale data generation, packaging scripts
+docs/superpowers/specs/2026-10-21-apkinfoplus-design.md   design document
+docs/libchecker.md                                         library detection (LibChecker) design
+docs/images/                                               README screenshots
 ```
 
-## 发布
+## Releases
 
-推送 `v*` 标签触发 `.github/workflows/release.yml`：三平台构建打包，创建 GitHub Release，
-再通知 [scoop-bucket](https://github.com/huanfeng/scoop-bucket) 更新 manifest（需要仓库 Secret
-`SCOOP_BUCKET_GITHUB_TOKEN`，未配置时跳过）。版本号以标签为准，由 `scripts/set-version.py` 写入
-`Cargo.toml` 与 Windows 资源。
+Pushing a `v*` tag triggers `.github/workflows/release.yml`: builds and packages on all three platforms, creates the GitHub Release,
+then notifies the [scoop-bucket](https://github.com/huanfeng/scoop-bucket) to update its manifest (needs the repo secret
+`SCOOP_BUCKET_GITHUB_TOKEN`; skipped when unset). Versions come from the tag, written by `scripts/set-version.py`
+into `Cargo.toml` and Windows resources.
 
-配置文件位于平台配置目录下的 `apkinfoplus/config.toml`（Linux `~/.config/apkinfoplus/`），
-日志与下载的 platform-tools 位于数据目录 `apkinfoplus/`（Linux `~/.local/share/apkinfoplus/`）。
+The config file lives in `apkinfoplus/config.toml` under the platform config directory (Linux `~/.config/apkinfoplus/`);
+logs and downloaded platform-tools live in the data directory `apkinfoplus/` (Linux `~/.local/share/apkinfoplus/`).
 
-## 测试
+## Tests
 
 ```bash
-cargo test --workspace                 # 单元测试（含译文一致性 lint）
-cargo clippy --workspace --all-targets # 零警告
+cargo test --workspace                 # unit tests (including a translation consistency lint)
+cargo clippy --workspace --all-targets # zero warnings
 ```
 
-核心库里有几组 `#[ignore]` 的手工对照测试，通过环境变量指向本机文件运行：
-`APKINFO_SIG_APK`（签名 vs apksigner）、`APKINFO_INSTALL_APK` + `APKINFO_INSTALL_DEV`（真机安装）、`APKINFO_DL_DIR`（联网下载）。
+The core library has several `#[ignore]` manual comparison tests, run by pointing environment variables at local files:
+`APKINFO_SIG_APK` (signature vs apksigner), `APKINFO_INSTALL_APK` + `APKINFO_INSTALL_DEV` (real-device install), `APKINFO_DL_DIR` (network download).
 
-## 与 Flutter 版的差异
+## Differences from the Flutter version
 
-- 解析引擎只保留内置实现，不再提供 aapt2 切换；签名改为证书解析（不做完整性校验），不再需要 apksigner / Java。
-- 长列表（权限、分包、签名）改为独立标签页，去掉了「列表最大行数」设置。
-- 分包分类修正了 `config.en` 这类语言包被归为「其他」的问题；安装失败会显示 adb 给出的原因（含退出码为 0 但输出 `Failure` 的情况）。
-- 重命名会拒绝非法字符与同名覆盖；导出文件名跟随当前选择的应用名语言。
-- SVG 导出的 clip-path 真正生效。
+- The parsing engine keeps only the built-in implementation; the aapt2 switch is gone; signature handling became certificate parsing (no integrity verification), removing the apksigner / Java requirement.
+- Long lists (permissions, splits, signature) became dedicated tabs; the "max list rows" setting is gone.
+- Split classification fixes language packs such as `config.en` being grouped under "Other"; install failures show the reason adb reported (including exit code 0 with a `Failure` line).
+- Renaming rejects invalid characters and overwriting an existing name; exported file names follow the currently selected app-name language.
+- SVG export clip-path actually takes effect.
 
-## 致谢与许可证
+## Acknowledgements & License
 
-本项目以 MIT 许可证发布。
+This project is released under the MIT license.
 
-- 界面基于作者的 [windui](https://github.com/huanfeng/wind-ui-rust)
-- 库识别的思路与规则来自 [LibChecker](https://github.com/LibChecker/LibChecker)
+- The UI is built on the author's [windui](https://github.com/huanfeng/wind-ui-rust)
+- Library detection ideas and rules come from [LibChecker](https://github.com/LibChecker/LibChecker)
 
-库识别内嵌的规则数据与图标来自 [LibChecker-Rules](https://github.com/LibChecker/LibChecker-Rules)，
-按 Apache-2.0 分发（发布包内附 `LICENSE-LibChecker-Rules.txt`）；我们只重新打包（合并详情文件、改用压缩），
-不修改规则内容。图标为各厂商商标，仅用于标识对应 SDK。
+The rule data and icons embedded for library detection come from [LibChecker-Rules](https://github.com/LibChecker/LibChecker-Rules),
+distributed under Apache-2.0 (the release ships a `LICENSE-LibChecker-Rules.txt`); we only repack (merge detail files, switch to a compressed format)
+and never modify rule content. Icons are the respective vendors' trademarks, used solely to identify each SDK.
